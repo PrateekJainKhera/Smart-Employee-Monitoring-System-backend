@@ -1,0 +1,68 @@
+2026-03-24 15:45:07 | INFO     | app.main:19 - Starting Smart Employee Monitoring System
+2026-03-24 15:45:07 | INFO     | app.main:20 - Storage mode: in-memory (Phase 1-4)
+2026-03-24 15:45:07 | INFO     | app.main:21 - Log level: INFO
+2026-03-24 16:01:35 | INFO     | app.main:24 - Shutting down...
+2026-03-24 16:01:40 | INFO     | app.main:19 - Starting Smart Employee Monitoring System
+2026-03-24 16:01:40 | INFO     | app.main:20 - Storage mode: in-memory (Phase 1-4)
+2026-03-24 16:01:40 | INFO     | app.main:21 - Log level: INFO
+2026-03-24 16:57:29 | INFO     | app.main:24 - Shutting down...
+2026-03-24 17:05:21 | INFO     | app.main:21 - Starting Smart Employee Monitoring System
+2026-03-24 17:05:21 | INFO     | app.main:22 - Storage mode: in-memory (Phase 1-4)
+2026-03-24 17:05:21 | INFO     | app.main:30 - No cameras registered yet — add via POST /api/v1/cameras
+2026-03-24 17:06:06 | INFO     | app.camera.camera_manager:22 - Camera 1 (entry) starting — source: 0
+2026-03-24 17:06:06 | INFO     | app.camera.camera_manager:37 - Camera 1 connected
+2026-03-24 17:08:51 | INFO     | app.detection.yolo_detector:31 - Loading YOLO model from weights/yolov8n.pt on cpu...
+2026-03-24 17:08:52 | INFO     | app.detection.yolo_detector:35 - YOLO model loaded
+2026-03-24 17:26:53 | INFO     | app.camera.camera_manager:55 - Camera 1 thread stopped
+2026-03-24 17:26:53 | INFO     | app.camera.camera_manager:85 - Camera 1 stopped
+2026-03-24 17:36:39 | INFO     | app.main:35 - Shutting down camera threads...
+2026-03-24 17:36:39 | INFO     | app.camera.camera_manager:97 - All camera threads stopped
+2026-03-24 17:36:39 | INFO     | app.main:37 - Shutdown complete
+2026-03-24 17:36:44 | INFO     | app.main:21 - Starting Smart Employee Monitoring System
+2026-03-24 17:36:44 | INFO     | app.main:22 - Storage mode: in-memory (Phase 1-4)
+2026-03-24 17:36:44 | INFO     | app.main:30 - No cameras registered yet — add via POST /api/v1/cameras
+2026-03-24 17:37:12 | INFO     | app.camera.camera_manager:22 - Camera 1 (entry) starting — source: 0
+2026-03-24 17:37:13 | INFO     | app.camera.camera_manager:37 - Camera 1 connected
+2026-03-24 17:37:34 | INFO     | app.camera.camera_manager:55 - Camera 1 thread stopped
+2026-03-24 17:37:34 | INFO     | app.camera.camera_manager:85 - Camera 1 stopped
+2026-03-24 17:37:48 | INFO     | app.camera.camera_manager:22 - Camera 2 (entry) starting — source: 0
+2026-03-24 17:37:49 | INFO     | app.camera.camera_manager:37 - Camera 2 connected
+2026-03-24 17:38:33 | INFO     | app.detection.yolo_detector:31 - Loading YOLO model from weights/yolov8n.pt on cpu...
+2026-03-24 17:38:33 | INFO     | app.detection.yolo_detector:35 - YOLO model loaded
+2026-03-24 17:39:42 | INFO     | app.camera.camera_manager:55 - Camera 2 thread stopped
+2026-03-24 17:39:42 | INFO     | app.camera.camera_manager:85 - Camera 2 stopped
+2026-03-24 17:40:54 | INFO     | app.main:35 - Shutting down camera threads...
+2026-03-24 17:40:54 | INFO     | app.camera.camera_manager:97 - All camera threads stopped
+2026-03-24 17:40:54 | INFO     | app.main:37 - Shutdown complete
+2026-03-24 17:40:56 | INFO     | app.main:21 - Starting Smart Employee Monitoring System
+2026-03-24 17:40:56 | INFO     | app.main:22 - Storage mode: in-memory (Phase 1-4)
+2026-03-24 17:40:56 | INFO     | app.main:30 - No cameras registered yet — add via POST /api/v1/cameras
+2026-03-24 17:43:43 | INFO     | app.main:35 - Shutting down camera threads...
+2026-03-24 17:43:43 | INFO     | app.camera.camera_manager:97 - All camera threads stopped
+2026-03-24 17:43:43 | INFO     | app.main:37 - Shutdown complete
+2026-03-24 17:43:46 | INFO     | app.main:21 - Starting Smart Employee Monitoring System
+2026-03-24 17:43:46 | INFO     | app.main:22 - Storage mode: in-memory (Phase 1-4)
+2026-03-24 17:43:46 | INFO     | app.main:30 - No cameras registered yet — add via POST /api/v1/cameras
+2026-03-24 17:43:59 | INFO     | app.camera.camera_manager:22 - Camera 1 (entry) starting — source: 0
+2026-03-24 17:43:59 | INFO     | app.camera.camera_manager:37 - Camera 1 connected
+2026-03-24 17:44:09 | INFO     | app.detection.yolo_detector:31 - Loading YOLO model from weights/yolov8n.pt on cpu...
+2026-03-24 17:44:09 | INFO     | app.detection.yolo_detector:35 - YOLO model loaded
+2026-03-24 17:45:33 | INFO     | app.detection.yolo_detector:31 - Loading YOLO model from weights/yolov8n.pt on cpu...
+2026-03-24 17:45:33 | INFO     | app.detection.yolo_detector:35 - YOLO model loaded
+2026-03-24 17:45:36 | INFO     | app.camera.camera_manager:55 - Camera 1 thread stopped
+2026-03-24 17:45:36 | INFO     | app.camera.camera_manager:85 - Camera 1 stopped
+2026-03-24 17:45:37 | INFO     | app.camera.camera_manager:22 - Camera 1 (entry) starting — source: 0
+2026-03-24 17:45:37 | INFO     | app.camera.camera_manager:37 - Camera 1 connected
+2026-03-24 17:45:45 | INFO     | app.camera.camera_manager:55 - Camera 1 thread stopped
+2026-03-24 17:45:45 | INFO     | app.camera.camera_manager:85 - Camera 1 stopped
+2026-03-24 17:50:39 | INFO     | app.camera.camera_manager:22 - Camera 1 (entry) starting — source: 0
+2026-03-24 17:50:39 | INFO     | app.camera.camera_manager:71 - Camera 1 already running
+2026-03-24 17:50:39 | INFO     | app.camera.camera_manager:37 - Camera 1 connected
+2026-03-24 17:50:43 | INFO     | app.camera.camera_manager:55 - Camera 1 thread stopped
+2026-03-24 17:50:43 | INFO     | app.camera.camera_manager:85 - Camera 1 stopped
+2026-03-24 18:52:45 | INFO     | app.main:35 - Shutting down camera threads...
+2026-03-24 18:52:45 | INFO     | app.camera.camera_manager:97 - All camera threads stopped
+2026-03-24 18:52:45 | INFO     | app.main:37 - Shutdown complete
+2026-03-24 18:52:52 | INFO     | app.main:22 - Starting Smart Employee Monitoring System
+2026-03-24 18:52:52 | INFO     | app.main:23 - Storage mode: in-memory (Phase 1-4)
+2026-03-24 18:52:52 | INFO     | app.main:32 - No cameras registered yet — add via POST /api/v1/cameras

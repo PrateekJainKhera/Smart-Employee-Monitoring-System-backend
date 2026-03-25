@@ -1,0 +1,50 @@
+# =========================
+# Backend
+# =========================
+fastapi
+uvicorn[standard]
+
+# =========================
+# Computer Vision
+# =========================
+opencv-python
+ultralytics
+torch
+torchvision
+insightface
+
+# =========================
+# Tracking
+# =========================
+deep-sort-realtime
+
+# =========================
+# OCR (Optional)
+# =========================
+easyocr
+
+# =========================
+# Data Processing
+# =========================
+numpy
+
+# =========================
+# Database
+# =========================
+sqlalchemy
+pyodbc
+
+# =========================
+# Utilities
+# =========================
+pydantic
+pydantic-settings
+python-multipart
+python-dotenv
+loguru
+httpx
+
+# =========================
+# Real-time (Optional)
+# =========================
+redis
