@@ -12,6 +12,10 @@ ultralytics
 torch
 torchvision
 insightface
+onnxruntime
+# facenet-pytorch — install with: pip install facenet-pytorch --no-deps
+# (--no-deps needed on Python 3.14 due to Pillow wheel build conflict)
+# deepface was dropped — requires TensorFlow which has no Python 3.14 build
 
 # =========================
 # Tracking

@@ -66,3 +66,106 @@
 2026-03-24 18:52:52 | INFO     | app.main:22 - Starting Smart Employee Monitoring System
 2026-03-24 18:52:52 | INFO     | app.main:23 - Storage mode: in-memory (Phase 1-4)
 2026-03-24 18:52:52 | INFO     | app.main:32 - No cameras registered yet — add via POST /api/v1/cameras
+2026-03-25 15:31:33 | INFO     | app.main:24 - Starting Smart Employee Monitoring System
+2026-03-25 15:31:33 | INFO     | app.main:25 - Storage mode: in-memory (Phase 1-4)
+2026-03-25 15:31:33 | INFO     | app.main:28 - Loading InsightFace engine (may download model on first run)...
+2026-03-25 15:31:40 | INFO     | app.recognition.insightface_engine:27 - InsightFaceEngine loaded model 'buffalo_s'
+2026-03-25 15:31:40 | INFO     | app.recognition.deepface_engine:34 - FaceNetEngine (facenet-pytorch) loaded — VGGFace2 pretrained
+2026-03-25 15:31:40 | INFO     | app.recognition.embedding_store:35 - No embeddings file at data\embeddings.pkl — starting fresh
+2026-03-25 15:31:40 | INFO     | app.main:44 - Face recognition ready — 0 embedding(s) loaded from store
+2026-03-25 15:31:40 | INFO     | app.main:55 - No cameras registered yet — add via POST /api/v1/cameras
+2026-03-25 15:34:58 | INFO     | app.recognition.embedding_store:49 - EmbeddingStore: saved embedding for employee 1
+2026-03-25 15:34:58 | INFO     | app.services.employee_service:64 - EmployeeService: saved face image to data\employee_faces\1\photo.jpg
+2026-03-25 15:34:58 | INFO     | app.services.employee_service:68 - EmployeeService: face registered for employee 1
+2026-03-25 15:34:58 | INFO     | app.api.employees:92 - Face registered for employee 1
+2026-03-25 15:35:35 | INFO     | app.camera.camera_manager:22 - Camera 1 (entry) starting — source: 0
+2026-03-25 15:35:35 | INFO     | app.detection.yolo_detector:31 - Loading YOLO model from weights/yolov8n.pt on cpu...
+2026-03-25 15:35:35 | INFO     | app.detection.yolo_detector:35 - YOLO model loaded
+2026-03-25 15:35:35 | INFO     | app.pipeline.processing_pipeline:58 - Pipeline started for camera 1 (entry)
+2026-03-25 15:35:36 | INFO     | app.camera.camera_manager:37 - Camera 1 connected
+2026-03-25 15:35:38 | INFO     | app.recognition.face_recognizer:70 - FaceRecognizer: HIGH match employee_id=1 score=0.7145
+2026-03-25 15:35:38 | INFO     | app.pipeline.processing_pipeline:116 - Pipeline cam=1 track=1 → employee_id=1 conf=0.71 method=insightface_high
+2026-03-25 15:38:14 | INFO     | app.detection.yolo_detector:31 - Loading YOLO model from weights/yolov8n.pt on cpu...
+2026-03-25 15:38:14 | INFO     | app.detection.yolo_detector:35 - YOLO model loaded
+2026-03-25 15:38:21 | INFO     | app.camera.camera_manager:55 - Camera 1 thread stopped
+2026-03-25 15:38:21 | INFO     | app.camera.camera_manager:85 - Camera 1 stopped
+2026-03-25 16:11:24 | INFO     | app.main:60 - Shutting down pipelines and camera threads...
+2026-03-25 16:11:24 | INFO     | app.pipeline.processing_pipeline:64 - Pipeline stopped for camera 1
+2026-03-25 16:11:24 | INFO     | app.camera.camera_manager:97 - All camera threads stopped
+2026-03-25 16:11:24 | INFO     | app.main:63 - Shutdown complete
+2026-03-25 16:11:31 | INFO     | app.main:24 - Starting Smart Employee Monitoring System
+2026-03-25 16:11:31 | INFO     | app.main:25 - Storage mode: in-memory (Phase 1-4)
+2026-03-25 16:11:31 | INFO     | app.main:28 - Loading InsightFace engine (may download model on first run)...
+2026-03-25 16:11:33 | INFO     | app.recognition.insightface_engine:27 - InsightFaceEngine loaded model 'buffalo_s'
+2026-03-25 16:11:33 | INFO     | app.recognition.deepface_engine:34 - FaceNetEngine (facenet-pytorch) loaded — VGGFace2 pretrained
+2026-03-25 16:11:33 | INFO     | app.recognition.embedding_store:30 - EmbeddingStore loaded 1 embeddings from data\embeddings.pkl
+2026-03-25 16:11:33 | INFO     | app.main:44 - Face recognition ready — 1 embedding(s) loaded from store
+2026-03-25 16:11:33 | INFO     | app.main:55 - No cameras registered yet — add via POST /api/v1/cameras
+2026-03-25 16:12:21 | INFO     | app.main:60 - Shutting down pipelines and camera threads...
+2026-03-25 16:12:21 | INFO     | app.camera.camera_manager:97 - All camera threads stopped
+2026-03-25 16:12:21 | INFO     | app.main:63 - Shutdown complete
+2026-03-25 16:12:28 | INFO     | app.main:24 - Starting Smart Employee Monitoring System
+2026-03-25 16:12:28 | INFO     | app.main:25 - Storage mode: in-memory (Phase 1-4)
+2026-03-25 16:12:28 | INFO     | app.main:28 - Loading InsightFace engine (may download model on first run)...
+2026-03-25 16:12:30 | INFO     | app.recognition.insightface_engine:27 - InsightFaceEngine loaded model 'buffalo_s'
+2026-03-25 16:12:30 | INFO     | app.recognition.deepface_engine:34 - FaceNetEngine (facenet-pytorch) loaded — VGGFace2 pretrained
+2026-03-25 16:12:30 | INFO     | app.recognition.embedding_store:30 - EmbeddingStore loaded 1 embeddings from data\embeddings.pkl
+2026-03-25 16:12:30 | INFO     | app.main:44 - Face recognition ready — 1 embedding(s) loaded from store
+2026-03-25 16:12:30 | INFO     | app.main:55 - No cameras registered yet — add via POST /api/v1/cameras
+2026-03-25 16:14:26 | INFO     | app.main:60 - Shutting down pipelines and camera threads...
+2026-03-25 16:14:26 | INFO     | app.camera.camera_manager:97 - All camera threads stopped
+2026-03-25 16:14:26 | INFO     | app.main:63 - Shutdown complete
+2026-03-25 16:15:05 | INFO     | app.main:24 - Starting Smart Employee Monitoring System
+2026-03-25 16:15:05 | INFO     | app.main:25 - Storage mode: in-memory (Phase 1-4)
+2026-03-25 16:15:05 | INFO     | app.main:28 - Loading InsightFace engine (may download model on first run)...
+2026-03-25 16:15:07 | INFO     | app.recognition.insightface_engine:27 - InsightFaceEngine loaded model 'buffalo_s'
+2026-03-25 16:15:07 | INFO     | app.recognition.deepface_engine:34 - FaceNetEngine (facenet-pytorch) loaded — VGGFace2 pretrained
+2026-03-25 16:15:07 | INFO     | app.recognition.embedding_store:30 - EmbeddingStore loaded 1 embeddings from data\embeddings.pkl
+2026-03-25 16:15:07 | INFO     | app.main:44 - Face recognition ready — 1 embedding(s) loaded from store
+2026-03-25 16:15:07 | INFO     | app.main:55 - No cameras registered yet — add via POST /api/v1/cameras
+2026-03-25 16:16:52 | INFO     | app.camera.camera_manager:22 - Camera 1 (entry) starting — source: rtsp://admin:admin123@115.246.61.35:8082/cam/realmonitor?channel=1&subtype=0
+2026-03-25 16:16:52 | INFO     | app.detection.yolo_detector:31 - Loading YOLO model from weights/yolov8n.pt on cpu...
+2026-03-25 16:16:52 | INFO     | app.detection.yolo_detector:35 - YOLO model loaded
+2026-03-25 16:16:52 | INFO     | app.pipeline.processing_pipeline:112 - Pipeline started for camera 1 (entry)
+2026-03-25 16:17:16 | INFO     | app.detection.yolo_detector:31 - Loading YOLO model from weights/yolov8n.pt on cpu...
+2026-03-25 16:17:16 | INFO     | app.detection.yolo_detector:35 - YOLO model loaded
+2026-03-25 16:18:22 | INFO     | app.camera.camera_manager:85 - Camera 1 stopped
+2026-03-25 16:18:22 | INFO     | app.pipeline.processing_pipeline:118 - Pipeline stopped for camera 1
+2026-03-25 16:18:31 | INFO     | app.camera.camera_manager:22 - Camera 2 (entry) starting — source: 0
+2026-03-25 16:18:31 | INFO     | app.detection.yolo_detector:31 - Loading YOLO model from weights/yolov8n.pt on cpu...
+2026-03-25 16:18:31 | INFO     | app.detection.yolo_detector:35 - YOLO model loaded
+2026-03-25 16:18:31 | INFO     | app.pipeline.processing_pipeline:112 - Pipeline started for camera 2 (entry)
+2026-03-25 16:18:32 | INFO     | app.camera.camera_manager:37 - Camera 2 connected
+2026-03-25 16:18:34 | INFO     | app.recognition.face_recognizer:70 - FaceRecognizer: HIGH match employee_id=1 score=0.7045
+2026-03-25 16:18:34 | INFO     | app.pipeline.processing_pipeline:43 - Recognized cam=2 track=1 → employee_id=1 conf=0.70 method=insightface_high
+2026-03-25 16:18:40 | INFO     | app.camera.camera_manager:55 - Camera 2 thread stopped
+2026-03-25 16:18:40 | INFO     | app.camera.camera_manager:85 - Camera 2 stopped
+2026-03-25 16:18:40 | INFO     | app.pipeline.processing_pipeline:118 - Pipeline stopped for camera 2
+2026-03-25 16:18:56 | WARNING  | app.camera.camera_manager:29 - Camera 1 failed to open. Retrying in 2s...
+2026-03-25 16:18:58 | INFO     | app.camera.camera_manager:55 - Camera 1 thread stopped
+2026-03-25 16:20:01 | INFO     | app.camera.camera_manager:22 - Camera 3 (entry) starting — source: rtsp://admin:admin123@115.246.61.35:8081/cam/realmonitor?channel=1&subtype=0
+2026-03-25 16:20:01 | INFO     | app.detection.yolo_detector:31 - Loading YOLO model from weights/yolov8n.pt on cpu...
+2026-03-25 16:20:01 | INFO     | app.detection.yolo_detector:35 - YOLO model loaded
+2026-03-25 16:20:01 | INFO     | app.pipeline.processing_pipeline:112 - Pipeline started for camera 3 (entry)
+2026-03-25 16:22:04 | WARNING  | app.camera.camera_manager:29 - Camera 3 failed to open. Retrying in 2s...
+2026-03-25 16:24:09 | WARNING  | app.camera.camera_manager:29 - Camera 3 failed to open. Retrying in 4s...
+2026-03-25 16:25:19 | INFO     | app.camera.camera_manager:85 - Camera 3 stopped
+2026-03-25 16:25:19 | INFO     | app.pipeline.processing_pipeline:118 - Pipeline stopped for camera 3
+2026-03-25 16:26:17 | WARNING  | app.camera.camera_manager:29 - Camera 3 failed to open. Retrying in 8s...
+2026-03-25 16:26:25 | INFO     | app.camera.camera_manager:55 - Camera 3 thread stopped
+2026-03-25 16:32:37 | INFO     | app.camera.camera_manager:22 - Camera 4 (entry) starting — source: 0
+2026-03-25 16:32:37 | INFO     | app.detection.yolo_detector:31 - Loading YOLO model from weights/yolov8n.pt on cpu...
+2026-03-25 16:32:37 | INFO     | app.detection.yolo_detector:35 - YOLO model loaded
+2026-03-25 16:32:37 | INFO     | app.pipeline.processing_pipeline:112 - Pipeline started for camera 4 (entry)
+2026-03-25 16:32:38 | INFO     | app.camera.camera_manager:37 - Camera 4 connected
+2026-03-25 16:32:39 | INFO     | app.recognition.face_recognizer:70 - FaceRecognizer: HIGH match employee_id=1 score=0.6857
+2026-03-25 16:32:39 | INFO     | app.pipeline.processing_pipeline:43 - Recognized cam=4 track=1 → employee_id=1 conf=0.69 method=insightface_high
+2026-03-25 16:33:00 | INFO     | app.recognition.embedding_store:49 - EmbeddingStore: saved embedding for employee 1
+2026-03-25 16:33:00 | INFO     | app.services.employee_service:64 - EmployeeService: saved face image to data\employee_faces\1\photo.jpg
+2026-03-25 16:33:00 | INFO     | app.services.employee_service:68 - EmployeeService: face registered for employee 1
+2026-03-25 16:33:00 | INFO     | app.api.employees:92 - Face registered for employee 1
+2026-03-25 16:35:18 | INFO     | app.recognition.embedding_store:57 - EmbeddingStore: removed embedding for employee 1
+2026-03-25 16:35:18 | INFO     | app.services.employee_service:85 - EmployeeService: deleted face data for employee 1
+2026-03-25 16:35:22 | INFO     | app.camera.camera_manager:55 - Camera 4 thread stopped
+2026-03-25 16:35:22 | INFO     | app.camera.camera_manager:85 - Camera 4 stopped
+2026-03-25 16:35:22 | INFO     | app.pipeline.processing_pipeline:118 - Pipeline stopped for camera 4

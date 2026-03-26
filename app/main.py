@@ -11,6 +11,8 @@ from app.camera.camera_manager import camera_manager
 from app.pipeline.processing_pipeline import pipeline_manager
 from app.store import state
 from app.api import employees, cameras
+import app.recognition.face_recognizer as _fr_module
+import app.services.employee_service as _es_module
 
 START_TIME = time.time()
 
@@ -20,9 +22,30 @@ async def lifespan(app: FastAPI):
     # ── Startup ──────────────────────────────────────────────
     setup_logger(settings.log_level)
     logger.info("Starting Smart Employee Monitoring System")
-    logger.info(f"Storage mode: in-memory (Phase 1-4)")
+    logger.info("Storage mode: in-memory (Phase 1-4)")
 
-    # Start camera threads + processing pipelines for pre-registered cameras
+    # ── Initialize Face Recognition engine ───────────────────
+    logger.info("Loading InsightFace engine (may download model on first run)...")
+    from app.recognition.insightface_engine import InsightFaceEngine
+    from app.recognition.deepface_engine import DeepFaceEngine
+    from app.recognition.embedding_store import EmbeddingStore
+
+    insightface_engine = InsightFaceEngine(model_name="buffalo_s")
+    deepface_engine = DeepFaceEngine()
+    embedding_store = EmbeddingStore(settings.embeddings_path)
+
+    from app.recognition.face_recognizer import FaceRecognizer
+    from app.services.employee_service import EmployeeService
+
+    _fr_module.face_recognizer = FaceRecognizer(
+        insightface_engine, deepface_engine, embedding_store
+    )
+    _es_module.employee_service = EmployeeService(insightface_engine, embedding_store)
+    logger.info(
+        f"Face recognition ready — {embedding_store.count()} embedding(s) loaded from store"
+    )
+
+    # ── Start camera threads + processing pipelines ──────────
     existing_cameras = state.list_cameras()
     if existing_cameras:
         logger.info(f"Starting {len(existing_cameras)} camera thread(s) and pipeline(s)...")
