@@ -55,14 +55,40 @@ class InsightFaceEngine:
             logger.warning(f"InsightFaceEngine.get_embedding error: {e}")
             return None
 
+    def get_faces(self, frame: np.ndarray) -> list[dict]:
+        """
+        Run face detection + embedding on the full frame.
+        Returns list of dicts: [{"bbox": (x1,y1,x2,y2), "embedding": np.ndarray}, ...]
+        Much faster than cropping individual heads — one inference call for all faces.
+        """
+        if not self.ready:
+            return []
+        try:
+            faces = self._app.get(frame)
+            results = []
+            for face in faces:
+                emb = face.embedding
+                if emb is None:
+                    continue
+                norm = np.linalg.norm(emb)
+                emb = emb / norm if norm > 0 else emb
+                x1, y1, x2, y2 = [int(v) for v in face.bbox]
+                results.append({"bbox": (x1, y1, x2, y2), "embedding": emb})
+            return results
+        except Exception as e:
+            logger.warning(f"InsightFaceEngine.get_faces error: {e}")
+            return []
+
     def match(
         self,
         embedding: np.ndarray,
-        store: dict[int, np.ndarray],
+        store: dict[int, list[np.ndarray]],
     ) -> tuple[int | None, float]:
         """
-        Compare embedding against all stored embeddings.
-        Returns (best_employee_id, best_score) or (None, 0.0) if store is empty.
+        Compare embedding against all stored embeddings for every employee.
+        Each employee may have multiple embeddings (different angles).
+        Returns (best_employee_id, best_score) — best score across all angles.
+        Returns (None, 0.0) if store is empty.
         """
         if not store:
             return None, 0.0
@@ -70,10 +96,11 @@ class InsightFaceEngine:
         best_id: int | None = None
         best_score: float = -1.0
 
-        for emp_id, ref_emb in store.items():
-            score = cosine_similarity(embedding, ref_emb)
-            if score > best_score:
-                best_score = score
-                best_id = emp_id
+        for emp_id, ref_embeddings in store.items():
+            for ref_emb in ref_embeddings:
+                score = cosine_similarity(embedding, ref_emb)
+                if score > best_score:
+                    best_score = score
+                    best_id = emp_id
 
         return best_id, best_score

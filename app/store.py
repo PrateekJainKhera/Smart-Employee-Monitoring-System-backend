@@ -27,19 +27,30 @@ class AppState:
     # Employees
     # ------------------------------------------------------------------
 
-    def add_employee(self, name: str, department: str = "", designation: str = "", email: str = "") -> dict:
+    def add_employee(
+        self,
+        name: str,
+        department: str = "",
+        designation: str = "",
+        email: str = "",
+        employee_id: Optional[int] = None,
+        face_registered: bool = False,
+        created_at: Optional[str] = None,
+    ) -> dict:
         with self._lock:
+            eid = employee_id if employee_id is not None else self._next_employee_id
             emp = {
-                "id": self._next_employee_id,
+                "id": eid,
                 "name": name,
                 "department": department,
                 "designation": designation,
                 "email": email,
-                "face_registered": False,
-                "created_at": datetime.utcnow().isoformat(),
+                "face_registered": face_registered,
+                "created_at": created_at or datetime.utcnow().isoformat(),
             }
-            self._employees[self._next_employee_id] = emp
-            self._next_employee_id += 1
+            self._employees[eid] = emp
+            if eid >= self._next_employee_id:
+                self._next_employee_id = eid + 1
             return emp.copy()
 
     def get_employee(self, employee_id: int) -> Optional[dict]:
@@ -72,17 +83,26 @@ class AppState:
     # Cameras
     # ------------------------------------------------------------------
 
-    def add_camera(self, name: str, location_label: str, rtsp_url: str) -> dict:
+    def add_camera(
+        self,
+        name: str,
+        location_label: str,
+        rtsp_url: str,
+        camera_id: Optional[int] = None,
+        is_active: bool = True,
+    ) -> dict:
         with self._lock:
+            cid = camera_id if camera_id is not None else self._next_camera_id
             cam = {
-                "id": self._next_camera_id,
+                "id": cid,
                 "name": name,
                 "location_label": location_label,
                 "rtsp_url": rtsp_url,
-                "is_active": True,
+                "is_active": is_active,
             }
-            self._cameras[self._next_camera_id] = cam
-            self._next_camera_id += 1
+            self._cameras[cid] = cam
+            if cid >= self._next_camera_id:
+                self._next_camera_id = cid + 1
             return cam.copy()
 
     def get_camera(self, camera_id: int) -> Optional[dict]:

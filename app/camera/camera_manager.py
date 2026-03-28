@@ -18,25 +18,42 @@ class CameraThread(threading.Thread):
         self._stop_event = threading.Event()
         self.is_connected = False
 
+    def _open_capture(self) -> cv2.VideoCapture:
+        """Open VideoCapture with low-latency settings."""
+        import os
+        source = self.source
+        is_rtsp = isinstance(source, str) and source.lower().startswith("rtsp")
+
+        if is_rtsp:
+            # Force TCP transport + tiny buffer for minimum latency
+            os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = (
+                "rtsp_transport;tcp|buffer_size;65536|stimeout;3000000|max_delay;100000"
+            )
+            cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
+        else:
+            cap = cv2.VideoCapture(source)
+
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)   # keep only the latest frame in OpenCV buffer
+        return cap
+
     def run(self) -> None:
         logger.info(f"Camera {self.camera_id} ({self.location_label}) starting — source: {self.source}")
-        retry_delay = 2  # seconds
+        retry_delay = 2
 
         while not self._stop_event.is_set():
-            cap = cv2.VideoCapture(self.source)
+            cap = self._open_capture()
 
             if not cap.isOpened():
                 logger.warning(f"Camera {self.camera_id} failed to open. Retrying in {retry_delay}s...")
                 self.is_connected = False
                 time.sleep(retry_delay)
-                retry_delay = min(retry_delay * 2, 30)  # exponential backoff, max 30s
+                retry_delay = min(retry_delay * 2, 30)
                 continue
 
             self.is_connected = True
-            retry_delay = 2  # reset on success
+            retry_delay = 2
             logger.info(f"Camera {self.camera_id} connected")
 
-            frame_count = 0
             while not self._stop_event.is_set():
                 ret, frame = cap.read()
                 if not ret:
@@ -44,11 +61,9 @@ class CameraThread(threading.Thread):
                     self.is_connected = False
                     break
 
-                frame_count += 1
-                # Only buffer every 3rd frame to reduce CPU load
-                if frame_count % 3 == 0:
-                    frame = resize_frame(frame, width=640)
-                    frame_buffer.put_frame(self.camera_id, frame)
+                # Resize once here — all consumers (pipeline + streams) get 640px frames
+                frame = resize_frame(frame, width=640)
+                frame_buffer.put_frame(self.camera_id, frame)
 
             cap.release()
 

@@ -1,105 +1,134 @@
 import queue
 import threading
+import time
 import numpy as np
 from app.utils.logger import logger
 from app.camera.camera_manager import camera_manager
 from app.detection.yolo_detector import YOLODetector, BoundingBox
 from app.tracking.tracker import EmployeeTracker, Track
-from app.utils.helpers import get_head_crop
 from app.store import state as app_state
 from app.config import settings
 
-# ── Recognition worker (shared across all cameras) ────────────────────────────
-# Runs InsightFace in its own thread so the pipeline loop is never blocked.
-_recognition_queue: queue.Queue = queue.Queue(maxsize=30)
+# ── Recognition worker ────────────────────────────────────────────────────────
+# InsightFace runs in its own thread — pipeline loop never waits for it.
+# Queue item: (camera_id, frame, tracks_needing_recognition)
+_recognition_queue: queue.Queue = queue.Queue(maxsize=4)
 
 
 def _recognition_worker() -> None:
-    """
-    Dedicated thread that processes face recognition jobs from the queue.
-    Writes results directly into AppState so the pipeline can pick them up
-    on the next frame without ever having waited for InsightFace.
-    """
     while True:
         try:
             item = _recognition_queue.get(timeout=1)
         except queue.Empty:
             continue
 
-        camera_id, track_id, crop = item
-        key = f"{track_id}@{camera_id}"
-
-        # Skip if already identified while this job was queued
-        if app_state.get_track_identity(key) is not None:
-            _recognition_queue.task_done()
-            continue
-
+        camera_id, frame, tracks = item
         try:
             from app.recognition.face_recognizer import face_recognizer
             if face_recognizer is not None:
-                result = face_recognizer.identify(crop)
-                if result is not None:
-                    app_state.set_track_identity(key, result.employee_id)
-                    logger.info(
-                        f"Recognized cam={camera_id} track={track_id} "
-                        f"→ employee_id={result.employee_id} "
-                        f"conf={result.confidence:.2f} method={result.method}"
-                    )
+                results = face_recognizer.identify_in_frame(frame, tracks, camera_id)
+                for key, result in results.items():
+                    if app_state.get_track_identity(key) is None:
+                        app_state.set_track_identity(key, result.employee_id)
+                        track_id, _ = key.split("@")
+                        logger.info(
+                            f"Recognized cam={camera_id} track={track_id} "
+                            f"→ employee_id={result.employee_id} "
+                            f"conf={result.confidence:.2f} method={result.method}"
+                        )
         except Exception as e:
             logger.warning(f"Recognition worker error: {e}")
         finally:
             _recognition_queue.task_done()
 
 
-# Start the single recognition worker thread at module load
-_worker_thread = threading.Thread(
-    target=_recognition_worker, daemon=True, name="recognition-worker"
-)
-_worker_thread.start()
+# ── Attendance worker ─────────────────────────────────────────────────────────
+_attendance_queue: queue.Queue = queue.Queue(maxsize=100)
+
+
+def _attendance_worker() -> None:
+    while True:
+        try:
+            item = _attendance_queue.get(timeout=1)
+        except queue.Empty:
+            continue
+
+        employee_id, camera_id, location_label = item
+        try:
+            from app.services.attendance_service import handle_event
+            handle_event(employee_id, camera_id, location_label)
+        except Exception as e:
+            logger.warning(f"Attendance worker error: {e}")
+        finally:
+            _attendance_queue.task_done()
+
+
+threading.Thread(target=_recognition_worker, daemon=True, name="recognition-worker").start()
+threading.Thread(target=_attendance_worker,  daemon=True, name="attendance-worker").start()
 
 
 class ProcessingPipeline:
     """
-    Per-camera pipeline: detect → track → recognize (async) → attend (Phase 5).
+    Per-camera pipeline: detect → track → recognize → attend.
 
-    Recognition is non-blocking — face crops are queued to a dedicated worker
-    thread, so this loop always runs at full camera speed.
+    Throughput design:
+      • Pipeline ticks at _PIPELINE_INTERVAL (0.33s = ~3 fps) — no busy-wait
+      • YOLO runs every _DETECT_EVERY cycles (~1/sec) — biggest CPU saver
+      • Between YOLO cycles: reuse last known boxes for tracker continuity
+      • Max _MAX_TRACKS persons processed — prevents runaway in crowded scenes
+      • Recognition: fresh tracks every 2 cycles, stale tracks every 6 cycles
+      • Attendance: debounced 30s per employee
+
+    Thread layout (all non-blocking):
+      cam-{id}           capture only — cap.read() + resize → frame_buffer
+      pipeline-{id}      this loop: YOLO + DeepSORT at fixed rate
+      recognition-worker shared: InsightFace full-frame (one thread, queued)
+      attendance-worker  shared: DB writes (one thread, queued)
     """
 
-    # How often to retry recognition for an unidentified track (in frames)
-    _RECOG_RETRY_EVERY = 8
-    # Max attempts before giving up on a track (stops wasting CPU)
-    _RECOG_MAX_ATTEMPTS = 20
+    # ── Timing ──────────────────────────────────────────────────────────────
+    _PIPELINE_INTERVAL = 0.33   # ~3 pipeline cycles/sec
+    _DETECT_EVERY      = 3      # YOLO every 3 cycles → ~1 detection/sec (biggest impact)
+    # At 1 YOLO/sec: person in frame for 2s = 2 detections — reliable enough for entry/exit
+
+    # ── Recognition ─────────────────────────────────────────────────────────
+    _RECOG_FRESH_EVERY = 2      # cycles between recognition for fresh tracks (0–2 attempts)
+    _RECOG_STALE_EVERY = 6      # cycles between recognition for stale tracks (3–9 attempts)
+    _RECOG_MAX_ATTEMPTS = 10    # give up after N full-frame attempts
+
+    # ── Safety ──────────────────────────────────────────────────────────────
+    _MAX_TRACKS      = 6        # only run recognition on the N closest persons per frame
+    _ATTEND_DEBOUNCE = 30       # seconds between attendance queue pushes per employee
+
+    # ── FPS monitor ─────────────────────────────────────────────────────────
+    _FPS_LOG_EVERY   = 30       # log actual fps every N cycles (~10s)
 
     def __init__(self, camera_id: int, location_label: str):
-        self.camera_id = camera_id
+        self.camera_id      = camera_id
         self.location_label = location_label
-        self._stop_event = threading.Event()
+        self._stop_event    = threading.Event()
         self._thread: threading.Thread | None = None
 
-        # Detection — YOLOv8n (CPU)
         self._detector = YOLODetector(
             weights_path=settings.yolo_weights_path,
             confidence=0.45,
             device="cpu",
         )
+        self._tracker = EmployeeTracker(max_age=30, n_init=1)
 
-        # Tracking — n_init=2: confirmed after 2 frames (faster than 3)
-        self._tracker = EmployeeTracker(max_age=30, n_init=2)
-
-        # Latest processed state — read by stream endpoints
-        self._last_tracks: list[Track] = []
-        self._last_boxes: list[BoundingBox] = []
+        self._last_tracks: list[Track]      = []
+        self._last_boxes:  list[BoundingBox] = []
         self._lock = threading.Lock()
 
-        # Frame counter and detection cadence
         self._frame_count = 0
-        self._detect_every = 4       # YOLO every 4 frames (was 5)
+        self._recog_attempts: dict[str, int]    = {}
+        self._attend_last:    dict[tuple, float] = {}
 
-        # Per-track recognition bookkeeping: track_id → attempt count
-        self._recog_attempts: dict[str, int] = {}
+        # FPS monitoring state
+        self._fps_t0    = 0.0
+        self._fps_count = 0
 
-    # ── Public API ────────────────────────────────────────────────────
+    # ── Public API ───────────────────────────────────────────────────────────
 
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
@@ -109,13 +138,13 @@ class ProcessingPipeline:
             target=self._loop, daemon=True, name=f"pipeline-{self.camera_id}"
         )
         self._thread.start()
-        logger.info(f"Pipeline started for camera {self.camera_id} ({self.location_label})")
+        logger.info(f"Pipeline started cam={self.camera_id} ({self.location_label})")
 
     def stop(self) -> None:
         self._stop_event.set()
         if self._thread:
             self._thread.join(timeout=3)
-        logger.info(f"Pipeline stopped for camera {self.camera_id}")
+        logger.info(f"Pipeline stopped cam={self.camera_id}")
 
     def get_latest_tracks(self) -> list[Track]:
         with self._lock:
@@ -125,84 +154,124 @@ class ProcessingPipeline:
         with self._lock:
             return list(self._last_boxes)
 
-    # ── Internal loop ─────────────────────────────────────────────────
+    # ── Internal loop ────────────────────────────────────────────────────────
 
     def _loop(self) -> None:
-        logger.debug(f"Pipeline loop running for camera {self.camera_id}")
+        logger.debug(f"Pipeline loop cam={self.camera_id} (~{1/self._PIPELINE_INTERVAL:.0f} fps target)")
+        self._fps_t0 = time.monotonic()
+        next_tick = time.monotonic()
+
         while not self._stop_event.is_set():
+            # ── Rate limiter: sleep until next tick ──────────────────────
+            now  = time.monotonic()
+            wait = next_tick - now
+            if wait > 0:
+                self._stop_event.wait(timeout=wait)
+                if self._stop_event.is_set():
+                    break
+            next_tick = time.monotonic() + self._PIPELINE_INTERVAL
+
+            # ── Grab latest frame from buffer (non-blocking) ──────────────
             frame = camera_manager.get_frame(self.camera_id)
             if frame is None:
-                self._stop_event.wait(timeout=0.05)
-                continue
+                continue   # camera not ready yet
+
             self._frame_count += 1
+            self._fps_count   += 1
             self._process_frame(frame)
-        logger.debug(f"Pipeline loop exited for camera {self.camera_id}")
+
+            # ── FPS monitor ───────────────────────────────────────────────
+            if self._fps_count >= self._FPS_LOG_EVERY:
+                elapsed = time.monotonic() - self._fps_t0
+                logger.info(
+                    f"Pipeline cam={self.camera_id}: "
+                    f"{self._fps_count / elapsed:.1f} fps actual"
+                )
+                self._fps_count = 0
+                self._fps_t0    = time.monotonic()
+
+        logger.debug(f"Pipeline loop exited cam={self.camera_id}")
 
     def _process_frame(self, frame: np.ndarray) -> None:
-        # ── Step 1: Detection (every N frames) ──────────────────────────
-        if self._frame_count % self._detect_every == 0:
-            boxes = self._detector.detect(frame)
+
+        # ── Step 1: YOLO detection (every N cycles, reuse boxes otherwise) ─
+        # Frame is already 640px wide — resized once in camera_manager.
+        if self._frame_count % self._DETECT_EVERY == 0:
+            boxes = self._detector.detect(frame)   # ~50–100ms on CPU
             with self._lock:
                 self._last_boxes = boxes
         else:
             with self._lock:
                 boxes = list(self._last_boxes)
 
-        # ── Step 2: Tracking ─────────────────────────────────────────────
+        # ── Step 2: DeepSORT tracking ─────────────────────────────────────
         tracks = self._tracker.update(boxes, frame)
         with self._lock:
             self._last_tracks = tracks
 
-        # Clean up attempt counters for tracks that are no longer active
+        # Clean up state for tracks that left the frame
         active_keys = {f"{t.track_id}@{self.camera_id}" for t in tracks}
-        stale = [k for k in self._recog_attempts if k not in active_keys]
-        for k in stale:
+        for k in [k for k in self._recog_attempts if k not in active_keys]:
             del self._recog_attempts[k]
-            app_state.clear_track(k)   # identity resets when person leaves
+            app_state.clear_track(k)
 
-        # ── Step 3: Non-blocking recognition queue ───────────────────────
+        # ── Step 3: Recognition — limit to N closest persons ─────────────
+        # Sort by bbox area descending (larger area = person is closer to camera)
+        sorted_tracks = sorted(
+            tracks,
+            key=lambda t: (t.x2 - t.x1) * (t.y2 - t.y1),
+            reverse=True,
+        )[:self._MAX_TRACKS]
+
+        # Separate into fresh (few attempts) and stale (many attempts)
+        # Fresh tracks: retry every _RECOG_FRESH_EVERY cycles
+        # Stale tracks: retry every _RECOG_STALE_EVERY cycles (already tried many times)
+        fresh, stale = [], []
+        for t in sorted_tracks:
+            key      = f"{t.track_id}@{self.camera_id}"
+            attempts = self._recog_attempts.get(key, 0)
+            if app_state.get_track_identity(key) is not None:
+                continue   # already recognized — skip
+            if attempts >= self._RECOG_MAX_ATTEMPTS:
+                continue   # exhausted — give up
+            if attempts < 3:
+                fresh.append(t)
+            else:
+                stale.append(t)
+
+        to_recognize: list[Track] = []
+        if fresh and self._frame_count % self._RECOG_FRESH_EVERY == 0:
+            to_recognize.extend(fresh)
+        if stale and self._frame_count % self._RECOG_STALE_EVERY == 0:
+            to_recognize.extend(stale)
+
+        if to_recognize:
+            try:
+                _recognition_queue.put_nowait((self.camera_id, frame.copy(), to_recognize))
+                for t in to_recognize:
+                    key = f"{t.track_id}@{self.camera_id}"
+                    self._recog_attempts[key] = self._recog_attempts.get(key, 0) + 1
+            except queue.Full:
+                pass   # worker busy — try next cycle
+
+        # ── Step 4: Attendance (debounced, non-blocking DB write) ─────────
+        now = time.monotonic()
         for track in tracks:
             key = f"{track.track_id}@{self.camera_id}"
-
-            # Already identified — nothing to do
-            if app_state.get_track_identity(key) is not None:
+            emp = app_state.get_track_identity(key)
+            if emp is None:
                 continue
-
-            attempts = self._recog_attempts.get(key, 0)
-
-            # Gave up after max attempts — wait for person to leave and re-enter
-            if attempts >= self._RECOG_MAX_ATTEMPTS:
+            dkey = (emp, self.camera_id)
+            if now - self._attend_last.get(dkey, 0) < self._ATTEND_DEBOUNCE:
                 continue
-
-            # Only retry every N frames (not every single frame)
-            if attempts > 0 and self._frame_count % self._RECOG_RETRY_EVERY != 0:
-                continue
-
-            # Crop head region (top 40% of person box + padding)
-            crop = get_head_crop(frame, track.to_tuple())
-            if crop is None:
-                continue
-
-            # Push to worker — non-blocking (drop if queue full)
+            self._attend_last[dkey] = now
             try:
-                _recognition_queue.put_nowait((self.camera_id, track.track_id, crop))
-                self._recog_attempts[key] = attempts + 1
+                _attendance_queue.put_nowait((emp, self.camera_id, self.location_label))
             except queue.Full:
-                pass   # worker is busy — will retry next interval
-
-        # ── Step 4: Attendance events (Phase 5 — placeholder) ────────────
-        # for track in tracks:
-        #     key = f"{track.track_id}@{self.camera_id}"
-        #     employee_id = app_state.get_track_identity(key)
-        #     if employee_id:
-        #         attendance_service.handle_event(
-        #             employee_id, self.camera_id, self.location_label
-        #         )
+                pass
 
 
 class PipelineManager:
-    """Manages one ProcessingPipeline per camera."""
-
     def __init__(self):
         self._pipelines: dict[int, ProcessingPipeline] = {}
         self._lock = threading.Lock()
@@ -211,15 +280,15 @@ class PipelineManager:
         with self._lock:
             if camera_id in self._pipelines:
                 return
-            pipeline = ProcessingPipeline(camera_id, location_label)
-            pipeline.start()
-            self._pipelines[camera_id] = pipeline
+            p = ProcessingPipeline(camera_id, location_label)
+            p.start()
+            self._pipelines[camera_id] = p
 
     def stop_pipeline(self, camera_id: int) -> None:
         with self._lock:
-            pipeline = self._pipelines.pop(camera_id, None)
-        if pipeline:
-            pipeline.stop()
+            p = self._pipelines.pop(camera_id, None)
+        if p:
+            p.stop()
 
     def start_all(self, cameras: list[dict]) -> None:
         for cam in cameras:
@@ -231,17 +300,16 @@ class PipelineManager:
             self.stop_pipeline(cid)
 
     def get_tracks(self, camera_id: int) -> list[Track]:
-        pipeline = self._pipelines.get(camera_id)
-        return pipeline.get_latest_tracks() if pipeline else []
+        p = self._pipelines.get(camera_id)
+        return p.get_latest_tracks() if p else []
 
     def get_boxes(self, camera_id: int) -> list[BoundingBox]:
-        pipeline = self._pipelines.get(camera_id)
-        return pipeline.get_latest_boxes() if pipeline else []
+        p = self._pipelines.get(camera_id)
+        return p.get_latest_boxes() if p else []
 
     def is_running(self, camera_id: int) -> bool:
-        pipeline = self._pipelines.get(camera_id)
-        return pipeline._thread.is_alive() if pipeline and pipeline._thread else False
+        p = self._pipelines.get(camera_id)
+        return p._thread.is_alive() if p and p._thread else False
 
 
-# Singleton
 pipeline_manager = PipelineManager()

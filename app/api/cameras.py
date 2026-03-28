@@ -8,17 +8,73 @@ from app.store import AppState
 from app.camera.camera_manager import camera_manager
 from app.pipeline.processing_pipeline import pipeline_manager
 from app.utils.helpers import frame_to_jpeg, draw_text
+from app.utils.logger import logger
 
 router = APIRouter(prefix="/cameras", tags=["Cameras"])
+
+
+# ── DB helpers ────────────────────────────────────────────────────────
+
+def _db_insert_camera(name: str, location_label: str, rtsp_url: str) -> int | None:
+    try:
+        from app.database.connection import is_db_enabled, get_db
+        if not is_db_enabled():
+            return None
+        with get_db() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                "INSERT INTO cameras (name, location_label, rtsp_url) "
+                "OUTPUT INSERTED.id VALUES (?, ?, ?)",
+                name, location_label, rtsp_url,
+            )
+            row = cursor.fetchone()
+            return row[0] if row else None
+    except Exception as e:
+        logger.warning(f"DB: failed to insert camera: {e}")
+        return None
+
+
+def _db_delete_camera(camera_id: int) -> None:
+    try:
+        from app.database.connection import is_db_enabled, get_db
+        if not is_db_enabled():
+            return
+        with get_db() as conn:
+            conn.cursor().execute("DELETE FROM cameras WHERE id=?", camera_id)
+    except Exception as e:
+        logger.warning(f"DB: failed to delete camera {camera_id}: {e}")
+
+
+def _db_update_camera(camera_id: int, **kwargs) -> None:
+    if not kwargs:
+        return
+    try:
+        from app.database.connection import is_db_enabled, get_db
+        if not is_db_enabled():
+            return
+        col_map = {"is_active": "is_active", "name": "name",
+                   "location_label": "location_label", "rtsp_url": "rtsp_url"}
+        db_fields = {col_map[k]: v for k, v in kwargs.items() if k in col_map}
+        if not db_fields:
+            return
+        cols = ", ".join(f"{k}=?" for k in db_fields)
+        vals = list(db_fields.values()) + [camera_id]
+        with get_db() as conn:
+            conn.cursor().execute(f"UPDATE cameras SET {cols} WHERE id=?", *vals)
+    except Exception as e:
+        logger.warning(f"DB: failed to update camera {camera_id}: {e}")
+
 
 # ── CRUD ─────────────────────────────────────────────────────────────
 
 @router.post("", response_model=CameraResponse, status_code=201)
 def create_camera(data: CameraCreate, state: AppState = Depends(get_state)):
+    db_id = _db_insert_camera(data.name, data.location_label, data.rtsp_url)
     cam = state.add_camera(
         name=data.name,
         location_label=data.location_label,
         rtsp_url=data.rtsp_url,
+        camera_id=db_id,
     )
     camera_manager.start_camera(cam["id"], cam["rtsp_url"], cam["location_label"])
     pipeline_manager.start_pipeline(cam["id"], cam["location_label"])
@@ -40,13 +96,17 @@ def get_camera(camera_id: int, state: AppState = Depends(get_state)):
 
 @router.put("/{camera_id}", response_model=CameraResponse)
 def update_camera(camera_id: int, data: CameraUpdate, state: AppState = Depends(get_state)):
-    updated = state.update_camera(camera_id, **data.model_dump(exclude_none=True))
+    patch = data.model_dump(exclude_none=True)
+    updated = state.update_camera(camera_id, **patch)
     if updated is None:
         raise HTTPException(status_code=404, detail="Camera not found")
+    _db_update_camera(camera_id, **patch)
     if data.is_active is not None:
         if data.is_active:
             camera_manager.start_camera(updated["id"], updated["rtsp_url"], updated["location_label"])
+            pipeline_manager.start_pipeline(updated["id"], updated["location_label"])
         else:
+            pipeline_manager.stop_pipeline(camera_id)
             camera_manager.stop_camera(camera_id)
     return updated
 
@@ -57,6 +117,7 @@ def delete_camera(camera_id: int, state: AppState = Depends(get_state)):
         raise HTTPException(status_code=404, detail="Camera not found")
     camera_manager.stop_camera(camera_id)
     pipeline_manager.stop_pipeline(camera_id)
+    _db_delete_camera(camera_id)
 
 
 # ── Single snapshot (for Postman testing) ───────────────────────────

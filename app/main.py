@@ -10,7 +10,7 @@ from app.utils.logger import setup_logger, logger
 from app.camera.camera_manager import camera_manager
 from app.pipeline.processing_pipeline import pipeline_manager
 from app.store import state
-from app.api import employees, cameras
+from app.api import employees, cameras, attendance
 import app.recognition.face_recognizer as _fr_module
 import app.services.employee_service as _es_module
 
@@ -22,7 +22,6 @@ async def lifespan(app: FastAPI):
     # ── Startup ──────────────────────────────────────────────
     setup_logger(settings.log_level)
     logger.info("Starting Smart Employee Monitoring System")
-    logger.info("Storage mode: in-memory (Phase 1-4)")
 
     # ── Initialize Face Recognition engine ───────────────────
     logger.info("Loading InsightFace engine (may download model on first run)...")
@@ -30,7 +29,7 @@ async def lifespan(app: FastAPI):
     from app.recognition.deepface_engine import DeepFaceEngine
     from app.recognition.embedding_store import EmbeddingStore
 
-    insightface_engine = InsightFaceEngine(model_name="buffalo_s")
+    insightface_engine = InsightFaceEngine(model_name="buffalo_l", det_size=(640, 640))
     deepface_engine = DeepFaceEngine()
     embedding_store = EmbeddingStore(settings.embeddings_path)
 
@@ -44,6 +43,49 @@ async def lifespan(app: FastAPI):
     logger.info(
         f"Face recognition ready — {embedding_store.count()} embedding(s) loaded from store"
     )
+
+    # ── Initialize SQL Server (Phase 5) ──────────────────────
+    from app.database.connection import is_db_enabled, test_connection, get_raw_connection
+    if is_db_enabled():
+        if test_connection():
+            logger.info("DB: connected to MS SQL Server")
+            from app.database.init_db import create_tables, load_all_employees, load_all_cameras
+            conn = get_raw_connection()
+            try:
+                create_tables(conn)
+                # Load existing employees + cameras from DB into AppState cache
+                db_employees = load_all_employees(conn)
+                db_cameras = load_all_cameras(conn)
+            finally:
+                conn.close()
+
+            for emp in db_employees:
+                state.add_employee(
+                    name=emp["name"],
+                    department=emp["department"],
+                    designation=emp["designation"],
+                    email=emp["email"],
+                    employee_id=emp["id"],
+                    face_registered=emp["face_registered"],
+                    created_at=emp["created_at"],
+                )
+            for cam in db_cameras:
+                state.add_camera(
+                    name=cam["name"],
+                    location_label=cam["location_label"],
+                    rtsp_url=cam["rtsp_url"],
+                    camera_id=cam["id"],
+                    is_active=cam["is_active"],
+                )
+            logger.info(
+                f"DB: loaded {len(db_employees)} employee(s) and "
+                f"{len(db_cameras)} camera(s) from SQL Server"
+            )
+            logger.info("Storage mode: SQL Server (Phase 5)")
+        else:
+            logger.warning("DB: DATABASE_URL set but connection failed — running in-memory only")
+    else:
+        logger.info("Storage mode: in-memory (set DATABASE_URL in .env to enable SQL Server)")
 
     # ── Start camera threads + processing pipelines ──────────
     existing_cameras = state.list_cameras()
@@ -87,14 +129,17 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 @app.get("/health", tags=["System"])
 def health():
+    from app.database.connection import is_db_enabled
     return {
         "status": "ok",
-        "storage": "in-memory",
+        "storage": "sql_server" if is_db_enabled() else "in-memory",
         "uptime_seconds": round(time.time() - START_TIME, 2),
         "version": "1.0.0",
         "active_cameras": camera_manager.active_cameras(),
+        "db_enabled": is_db_enabled(),
     }
 
 
 app.include_router(employees.router, prefix="/api/v1")
 app.include_router(cameras.router, prefix="/api/v1")
+app.include_router(attendance.router, prefix="/api/v1")
