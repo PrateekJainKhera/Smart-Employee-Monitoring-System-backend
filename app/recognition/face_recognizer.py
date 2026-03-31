@@ -113,7 +113,8 @@ class FaceRecognizer:
         # Use pure distance-based matching — no hard containment constraint.
         # High-angle CCTV cameras often detect face bbox ABOVE or beside the
         # person bbox due to perspective, so strict containment fails.
-        _MAX_ASSIGN_DIST = 220  # px — face center must be within this of track head
+        _MAX_ASSIGN_DIST = 400  # px — face center must be within this of track head
+        # 220 was too tight for close-up webcams where face bbox center is far from y1
 
         for face in detected_faces:
             fx1, fy1, fx2, fy2 = face["bbox"]

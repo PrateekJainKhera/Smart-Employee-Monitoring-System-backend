@@ -93,3 +93,35 @@ def get_breaks(attendance_log_id: int):
     _check_db()
     from app.services.attendance_service import list_breaks
     return list_breaks(attendance_log_id)
+
+
+# ── Missing / overdue employees ───────────────────────────────────────────────
+
+@router.get("/missing")
+def get_missing_employees(
+    threshold_min: int = Query(0, ge=0, description="Minutes on break before flagged as overdue (0 = absent only)"),
+):
+    """
+    Returns employees who have not checked in today (absent) or are overdue on break.
+
+    threshold_min=0  → only absent employees (no check-in today)
+    threshold_min=20 → absent + anyone on break for 20+ minutes
+    """
+    _check_db()
+    from app.services.attendance_service import get_missing_employees
+    return get_missing_employees(threshold_min)
+
+
+# ── Manual auto-checkout trigger ──────────────────────────────────────────────
+
+@router.post("/auto-checkout")
+def trigger_auto_checkout():
+    """
+    Manually trigger auto check-out check.
+    Applies end-of-day rule (after office_end_hour) and safety-net rule (max_break_min).
+    The background scheduler also runs this automatically every minute.
+    """
+    _check_db()
+    from app.services.attendance_service import auto_checkout_stale
+    count = auto_checkout_stale()
+    return {"checked_out": count}

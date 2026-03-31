@@ -10,7 +10,8 @@ from app.utils.logger import setup_logger, logger
 from app.camera.camera_manager import camera_manager
 from app.pipeline.processing_pipeline import pipeline_manager
 from app.store import state
-from app.api import employees, cameras, attendance
+from app.api import employees, cameras, attendance, reports
+from app.api import ws as ws_module
 import app.recognition.face_recognizer as _fr_module
 import app.services.employee_service as _es_module
 
@@ -87,6 +88,30 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Storage mode: in-memory (set DATABASE_URL in .env to enable SQL Server)")
 
+    # ── Store event loop for WebSocket thread-safe broadcasts ─
+    import asyncio
+    ws_module.set_event_loop(asyncio.get_event_loop())
+    logger.info("WS: event loop registered for thread-safe broadcast")
+
+    # ── Auto check-out background scheduler ──────────────────
+    if is_db_enabled():
+        import threading as _threading
+
+        def _auto_checkout_loop():
+            import time as _time
+            while True:
+                _time.sleep(60)
+                try:
+                    from app.services.attendance_service import auto_checkout_stale
+                    n = auto_checkout_stale()
+                    if n:
+                        logger.info(f"AutoCheckout scheduler: {n} employee(s) auto-checked-out")
+                except Exception as _e:
+                    logger.warning(f"AutoCheckout scheduler error: {_e}")
+
+        _threading.Thread(target=_auto_checkout_loop, daemon=True, name="auto-checkout").start()
+        logger.info("AutoCheckout scheduler started (runs every 60s, threshold=20min)")
+
     # ── Start camera threads + processing pipelines ──────────
     existing_cameras = state.list_cameras()
     if existing_cameras:
@@ -140,6 +165,8 @@ def health():
     }
 
 
-app.include_router(employees.router, prefix="/api/v1")
-app.include_router(cameras.router, prefix="/api/v1")
+app.include_router(employees.router,  prefix="/api/v1")
+app.include_router(cameras.router,    prefix="/api/v1")
 app.include_router(attendance.router, prefix="/api/v1")
+app.include_router(reports.router,    prefix="/api/v1")
+app.include_router(ws_module.router)   # WS lives at /ws/live (no /api/v1 prefix)

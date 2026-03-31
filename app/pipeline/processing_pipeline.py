@@ -27,7 +27,10 @@ def _recognition_worker() -> None:
             from app.recognition.face_recognizer import face_recognizer
             if face_recognizer is not None:
                 results = face_recognizer.identify_in_frame(frame, tracks, camera_id)
+
+                recognized_track_ids: set = set()
                 for key, result in results.items():
+                    recognized_track_ids.add(key)
                     if app_state.get_track_identity(key) is None:
                         app_state.set_track_identity(key, result.employee_id)
                         track_id, _ = key.split("@")
@@ -36,6 +39,24 @@ def _recognition_worker() -> None:
                             f"→ employee_id={result.employee_id} "
                             f"conf={result.confidence:.2f} method={result.method}"
                         )
+                        # WS: live detected event
+                        try:
+                            from app.store import state as _state
+                            cam = _state.get_camera(camera_id)
+                            label = cam["location_label"] if cam else ""
+                            emp = _state.get_employee(result.employee_id)
+                            name = emp["name"] if emp else str(result.employee_id)
+                            from app.api.ws import emit_detected
+                            emit_detected(result.employee_id, name, camera_id, label, result.confidence)
+                        except Exception:
+                            pass
+
+                # WS: unknown persons (tracks with no result after max attempts)
+                # Emit once when a track exhausts all attempts without recognition
+                for track in tracks:
+                    key = f"{track.track_id}@{camera_id}"
+                    if key not in recognized_track_ids and app_state.get_track_identity(key) is None:
+                        pass  # unknown emit handled below in _process_frame per-track
         except Exception as e:
             logger.warning(f"Recognition worker error: {e}")
         finally:

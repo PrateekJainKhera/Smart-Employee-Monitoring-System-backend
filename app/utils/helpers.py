@@ -103,6 +103,15 @@ def bbox_to_deepsort(bbox: tuple[int, int, int, int], confidence: float) -> list
     return [x1, y1, x2 - x1, y2 - y1, confidence]
 
 
+def is_within_office_hours(
+    timestamp: datetime,
+    start_hour: int = 8,
+    end_hour: int = 18,
+) -> bool:
+    """Returns True if the timestamp falls within office hours (default 08:00–18:00)."""
+    return start_hour <= timestamp.hour < end_hour
+
+
 def format_duration(minutes: float) -> str:
     if minutes < 60:
         return f"{int(minutes)}m"
