@@ -37,8 +37,8 @@ class FaceRecognizer:
     MEDIUM_THRESHOLD = 0.50
 
     # Full-frame thresholds — faces are smaller, angles vary, so slightly lower
-    FRAME_HIGH_THRESHOLD   = 0.52   # lowered from 0.55 (0.5544 just barely made it)
-    FRAME_MEDIUM_THRESHOLD = 0.35   # lowered from 0.42 → more DeepFace verification chances
+    FRAME_HIGH_THRESHOLD   = 0.52
+    FRAME_MEDIUM_THRESHOLD = 0.45   # raised from 0.35 — scores 0.35-0.44 almost never verify
 
     def __init__(
         self,
@@ -106,6 +106,35 @@ class FaceRecognizer:
             f"{len(detected_faces)} face(s) detected, {len(tracks)} track(s)"
         )
 
+        from app.snapshots.snapshot_store import snapshot_store
+        from app.store import state as _snap_state
+
+        def _cam_label(cid: int) -> str:
+            cam = _snap_state.get_camera(cid)
+            return cam["location_label"] if cam else ""
+
+        def _snap(face_bbox, track_id, emp_id, emp_name, conf, meth):
+            """Crop face from frame and save snapshot (with dedup)."""
+            key = f"{track_id}@{camera_id}"
+            if not snapshot_store.should_save(key):
+                return
+            h, w = frame.shape[:2]
+            pad = 8
+            fx1, fy1, fx2, fy2 = face_bbox
+            crop = frame[max(0, fy1 - pad):min(h, fy2 + pad),
+                         max(0, fx1 - pad):min(w, fx2 + pad)]
+            if crop.size == 0:
+                return
+            snapshot_store.save(
+                face_crop=crop,
+                camera_id=camera_id,
+                camera_label=_cam_label(camera_id),
+                employee_id=emp_id,
+                employee_name=emp_name,
+                confidence=conf,
+                method=meth,
+            )
+
         matched_track_ids: set[int] = set()
         assigned_tracks:  set[int] = set()  # prevents two faces → same track
 
@@ -150,7 +179,10 @@ class FaceRecognizer:
                 f"(need >={self.FRAME_HIGH_THRESHOLD} or >={self.FRAME_MEDIUM_THRESHOLD})"
             )
 
+            face_bbox_tuple = (fx1, fy1, fx2, fy2)
             if best_score >= self.FRAME_HIGH_THRESHOLD:
+                emp_name = _snap_state.get_employee(best_id)
+                emp_name = emp_name["name"] if emp_name else str(best_id)
                 results[key] = IdentityResult(
                     employee_id=best_id, confidence=best_score, method="frame_high"
                 )
@@ -158,6 +190,7 @@ class FaceRecognizer:
                     f"identify_in_frame MATCH: cam={camera_id} track={best_track.track_id} "
                     f"→ emp={best_id} score={best_score:.4f}"
                 )
+                _snap(face_bbox_tuple, best_track.track_id, best_id, emp_name, best_score, "frame_high")
             elif best_score >= self.FRAME_MEDIUM_THRESHOLD:
                 ref_image = self._load_reference_image(best_id)
                 if ref_image is not None:
@@ -166,6 +199,8 @@ class FaceRecognizer:
                     if fc.size > 0:
                         verified, dist_val = self._deepface.verify(fc, ref_image)
                         if verified:
+                            emp_name = _snap_state.get_employee(best_id)
+                            emp_name = emp_name["name"] if emp_name else str(best_id)
                             results[key] = IdentityResult(
                                 employee_id=best_id, confidence=best_score,
                                 method="frame_medium+deepface"
@@ -174,6 +209,12 @@ class FaceRecognizer:
                                 f"identify_in_frame MATCH (deepface): cam={camera_id} "
                                 f"track={best_track.track_id} → emp={best_id}"
                             )
+                            _snap(face_bbox_tuple, best_track.track_id, best_id, emp_name, best_score, "frame_medium+deepface")
+                        else:
+                            _snap(face_bbox_tuple, best_track.track_id, None, None, best_score, "unverified")
+            else:
+                # score below both thresholds — unknown face
+                _snap(face_bbox_tuple, best_track.track_id, None, None, best_score, "unknown")
 
         # ── Fallback: head-crop for unmatched tracks ───────────────────────
         # Any track whose face InsightFace didn't detect in the full frame
@@ -193,17 +234,23 @@ class FaceRecognizer:
                 best_id, best_score = self._insight.match(embedding, all_embeddings)
                 logger.debug(f"  head-crop track={track.track_id}: best_id={best_id} score={best_score:.4f}")
                 if best_score >= self.HIGH_THRESHOLD:
+                    emp_name = _snap_state.get_employee(best_id)
+                    emp_name = emp_name["name"] if emp_name else str(best_id)
                     results[key] = IdentityResult(
                         employee_id=best_id, confidence=best_score, method="crop_high"
                     )
+                    snapshot_store.save(crop, camera_id, _cam_label(camera_id), best_id, emp_name, best_score, "crop_high")
                 elif best_score >= self.MEDIUM_THRESHOLD:
                     ref_image = self._load_reference_image(best_id)
                     if ref_image is not None:
                         verified, _ = self._deepface.verify(crop, ref_image)
                         if verified:
+                            emp_name = _snap_state.get_employee(best_id)
+                            emp_name = emp_name["name"] if emp_name else str(best_id)
                             results[key] = IdentityResult(
                                 employee_id=best_id, confidence=best_score, method="crop_medium+deepface"
                             )
+                            snapshot_store.save(crop, camera_id, _cam_label(camera_id), best_id, emp_name, best_score, "crop_medium+deepface")
 
         return results
 
