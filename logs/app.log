@@ -16275,3 +16275,48 @@
 2026-04-02 15:45:34 | INFO     | app.pipeline.processing_pipeline:222 - Pipeline cam=2: 4.9 fps actual
 2026-04-02 15:45:39 | INFO     | app.pipeline.processing_pipeline:222 - Pipeline cam=3: 4.7 fps actual
 2026-04-02 15:45:40 | INFO     | app.pipeline.processing_pipeline:222 - Pipeline cam=2: 4.9 fps actual
+2026-04-02 15:45:47 | INFO     | app.pipeline.processing_pipeline:222 - Pipeline cam=3: 3.9 fps actual
+2026-04-02 15:45:47 | INFO     | app.pipeline.processing_pipeline:222 - Pipeline cam=2: 4.1 fps actual
+2026-04-02 15:45:55 | INFO     | app.pipeline.processing_pipeline:222 - Pipeline cam=3: 3.6 fps actual
+2026-04-02 15:45:55 | INFO     | app.pipeline.processing_pipeline:222 - Pipeline cam=2: 3.7 fps actual
+2026-04-02 15:46:01 | INFO     | app.pipeline.processing_pipeline:222 - Pipeline cam=2: 4.9 fps actual
+2026-04-02 15:46:01 | INFO     | app.pipeline.processing_pipeline:222 - Pipeline cam=3: 4.8 fps actual
+2026-04-02 15:46:07 | INFO     | app.pipeline.processing_pipeline:222 - Pipeline cam=2: 4.9 fps actual
+2026-04-02 15:46:08 | INFO     | app.pipeline.processing_pipeline:222 - Pipeline cam=3: 4.4 fps actual
+2026-04-02 15:46:14 | INFO     | app.pipeline.processing_pipeline:222 - Pipeline cam=2: 4.7 fps actual
+2026-04-02 15:46:15 | INFO     | app.pipeline.processing_pipeline:222 - Pipeline cam=3: 4.5 fps actual
+2026-04-02 15:46:20 | INFO     | app.pipeline.processing_pipeline:222 - Pipeline cam=2: 4.8 fps actual
+2026-04-02 15:46:21 | INFO     | app.pipeline.processing_pipeline:222 - Pipeline cam=3: 4.6 fps actual
+2026-04-02 15:46:26 | INFO     | app.pipeline.processing_pipeline:222 - Pipeline cam=2: 4.9 fps actual
+2026-04-02 15:46:28 | INFO     | app.pipeline.processing_pipeline:222 - Pipeline cam=3: 4.6 fps actual
+2026-04-02 15:46:32 | INFO     | app.pipeline.processing_pipeline:222 - Pipeline cam=2: 4.9 fps actual
+2026-04-02 15:46:34 | INFO     | app.pipeline.processing_pipeline:222 - Pipeline cam=3: 4.9 fps actual
+2026-04-02 15:46:39 | INFO     | app.pipeline.processing_pipeline:222 - Pipeline cam=2: 4.7 fps actual
+2026-04-02 15:46:40 | INFO     | app.pipeline.processing_pipeline:222 - Pipeline cam=3: 4.9 fps actual
+2026-04-02 15:46:48 | INFO     | app.main:25 - Starting Smart Employee Monitoring System
+2026-04-02 15:46:48 | INFO     | app.main:28 - Loading InsightFace engine (may download model on first run)...
+2026-04-02 15:46:51 | INFO     | app.recognition.insightface_engine:27 - InsightFaceEngine loaded model 'buffalo_l'
+2026-04-02 15:46:51 | INFO     | app.recognition.deepface_engine:34 - FaceNetEngine (facenet-pytorch) loaded — VGGFace2 pretrained
+2026-04-02 15:46:51 | INFO     | app.recognition.embedding_store:46 - EmbeddingStore: loaded 24 employee(s), 72 photo(s) from data\embeddings.pkl
+2026-04-02 15:46:51 | INFO     | app.main:44 - Face recognition ready — 24 embedding(s) loaded from store
+2026-04-02 15:46:51 | INFO     | app.main:52 - DB: connected to MS SQL Server
+2026-04-02 15:46:51 | INFO     | app.database.init_db:119 - DB: table 'employees' ready
+2026-04-02 15:46:51 | INFO     | app.database.init_db:119 - DB: table 'cameras' ready
+2026-04-02 15:46:51 | INFO     | app.database.init_db:119 - DB: table 'face_embeddings' ready
+2026-04-02 15:46:51 | INFO     | app.database.init_db:119 - DB: table 'attendance_logs' ready
+2026-04-02 15:46:51 | INFO     | app.database.init_db:119 - DB: table 'break_logs' ready
+2026-04-02 15:46:51 | INFO     | app.database.init_db:119 - DB: table 'movement_logs' ready
+2026-04-02 15:46:51 | INFO     | app.database.init_db:122 - DB: all tables initialized
+2026-04-02 15:46:51 | INFO     | app.main:81 - DB: loaded 26 employee(s) and 4 camera(s) from SQL Server
+2026-04-02 15:46:51 | INFO     | app.main:85 - Storage mode: SQL Server (Phase 5)
+2026-04-02 15:46:51 | INFO     | app.main:94 - WS: event loop registered for thread-safe broadcast
+2026-04-02 15:46:51 | INFO     | app.main:113 - AutoCheckout scheduler started (runs every 60s, threshold=20min)
+2026-04-02 15:46:51 | INFO     | app.main:118 - Starting 4 camera thread(s) and pipeline(s)...
+2026-04-02 15:46:51 | INFO     | app.camera.camera_manager:40 - Camera 2 (entry) starting — source: rtsp://admin:admin123@115.246.61.35:8082/cam/realmonitor?channel=1&subtype=0
+2026-04-02 15:46:51 | INFO     | app.camera.camera_manager:40 - Camera 3 (exit) starting — source: rtsp://admin:admin123@115.246.61.35:8081/cam/realmonitor?channel=1&subtype=0
+2026-04-02 15:46:51 | INFO     | app.detection.yolo_detector:31 - Loading YOLO model from weights/yolov8n.pt on cpu...
+2026-04-02 15:46:51 | INFO     | app.detection.yolo_detector:35 - YOLO model loaded
+2026-04-02 15:46:51 | INFO     | app.pipeline.processing_pipeline:177 - Pipeline started cam=2 (entry)
+2026-04-02 15:46:51 | INFO     | app.detection.yolo_detector:31 - Loading YOLO model from weights/yolov8n.pt on cpu...
+2026-04-02 15:46:51 | INFO     | app.detection.yolo_detector:35 - YOLO model loaded
+2026-04-02 15:46:51 | INFO     | app.pipeline.processing_pipeline:177 - Pipeline started cam=3 (exit)

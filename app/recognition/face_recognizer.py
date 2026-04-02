@@ -38,7 +38,7 @@ class FaceRecognizer:
 
     # Full-frame thresholds — faces are smaller, angles vary, so slightly lower
     FRAME_HIGH_THRESHOLD   = 0.52
-    FRAME_MEDIUM_THRESHOLD = 0.45   # raised from 0.35 — scores 0.35-0.44 almost never verify
+    FRAME_MEDIUM_THRESHOLD = 0.30   # try DeepFace verification for any score >= 30%
 
     def __init__(
         self,
