@@ -126,7 +126,8 @@ def list_attendance(target_date: Optional[date] = None) -> list[dict]:
         cursor.execute(
             "SELECT al.id, al.employee_id, e.name, al.check_in, al.check_out, "
             "       al.total_hours, al.date, "
-            "       (SELECT COUNT(*) FROM break_logs bl WHERE bl.attendance_log_id = al.id) AS break_count "
+            "       (SELECT COUNT(*) FROM break_logs bl WHERE bl.attendance_log_id = al.id) AS break_count, "
+            "       (SELECT COUNT(*) FROM break_logs bl WHERE bl.attendance_log_id = al.id AND bl.break_end IS NULL) AS open_breaks "
             "FROM attendance_logs al "
             "JOIN employees e ON e.id = al.employee_id "
             "WHERE al.date = ? "
@@ -144,6 +145,7 @@ def list_attendance(target_date: Optional[date] = None) -> list[dict]:
                 "total_hours": r[5],
                 "date": str(r[6]),
                 "break_count": r[7],
+                "on_break": r[4] is None and r[8] > 0,
             }
             for r in rows
         ]
@@ -267,8 +269,11 @@ def _handle_entry(cursor, employee_id: int, camera_id: int, now: datetime, today
                 f"{break_type} break ({duration:.1f} min)"
             )
             try:
+                from app.store import state as _state2
+                cam2 = _state2.get_camera(camera_id)
+                label2 = cam2["location_label"] if cam2 else "entry"
                 from app.api.ws import emit_break_end
-                emit_break_end(employee_id, name, duration, break_type)
+                emit_break_end(employee_id, name, duration, break_type, camera_id, label2)
             except Exception:
                 pass
 
@@ -317,8 +322,11 @@ def _handle_exit(cursor, employee_id: int, camera_id: int, now: datetime, today:
                 f"(total {total_hours:.2f}h)"
             )
             try:
+                from app.store import state as _state3
+                cam3 = _state3.get_camera(camera_id)
+                label3 = cam3["location_label"] if cam3 else "exit"
                 from app.api.ws import emit_checkout
-                emit_checkout(employee_id, name, total_hours, auto=False)
+                emit_checkout(employee_id, name, total_hours, auto=False, camera_id=camera_id, camera_label=label3)
             except Exception:
                 pass
 

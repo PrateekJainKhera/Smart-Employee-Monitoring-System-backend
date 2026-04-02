@@ -12,9 +12,9 @@ Broadcasts JSON events to all connected clients whenever:
 
 Message format:
   {"event": "checkin",    "employee_id": 7, "employee_name": "...", "camera_id": 2, "camera_label": "entry",  "timestamp": "..."}
-  {"event": "checkout",   "employee_id": 7, "employee_name": "...", "total_hours": 0.36, "timestamp": "..."}
+  {"event": "checkout",   "employee_id": 7, "employee_name": "...", "total_hours": 0.36, "auto": false, "camera_id": 3, "camera_label": "exit", "timestamp": "..."}
   {"event": "break_start","employee_id": 7, "employee_name": "...", "camera_id": 3, "timestamp": "..."}
-  {"event": "break_end",  "employee_id": 7, "employee_name": "...", "duration_min": 12.3, "break_type": "medium", "timestamp": "..."}
+  {"event": "break_end",  "employee_id": 7, "employee_name": "...", "duration_min": 12.3, "break_type": "medium", "camera_id": 1, "camera_label": "entry", "timestamp": "..."}
   {"event": "detected",   "employee_id": 7, "employee_name": "...", "camera_id": 2, "camera_label": "entry", "confidence": 0.64, "timestamp": "..."}
   {"event": "unknown",    "camera_id": 2, "camera_label": "entry", "timestamp": "..."}
 """
@@ -99,15 +99,19 @@ def emit_checkin(employee_id: int, employee_name: str, camera_id: int, camera_la
     })
 
 
-def emit_checkout(employee_id: int, employee_name: str, total_hours: float, auto: bool = False) -> None:
-    manager.send_event({
+def emit_checkout(employee_id: int, employee_name: str, total_hours: float, auto: bool = False, camera_id: int | None = None, camera_label: str | None = None) -> None:
+    msg: dict = {
         "event": "checkout",
         "employee_id": employee_id,
         "employee_name": employee_name,
         "total_hours": round(total_hours, 4),
         "auto": auto,
         "timestamp": _ts(),
-    })
+    }
+    if camera_id is not None:
+        msg["camera_id"] = camera_id
+        msg["camera_label"] = camera_label
+    manager.send_event(msg)
 
 
 def emit_break_start(employee_id: int, employee_name: str, camera_id: int) -> None:
@@ -120,15 +124,19 @@ def emit_break_start(employee_id: int, employee_name: str, camera_id: int) -> No
     })
 
 
-def emit_break_end(employee_id: int, employee_name: str, duration_min: float, break_type: str) -> None:
-    manager.send_event({
+def emit_break_end(employee_id: int, employee_name: str, duration_min: float, break_type: str, camera_id: int | None = None, camera_label: str | None = None) -> None:
+    msg: dict = {
         "event": "break_end",
         "employee_id": employee_id,
         "employee_name": employee_name,
         "duration_min": round(duration_min, 2),
         "break_type": break_type,
         "timestamp": _ts(),
-    })
+    }
+    if camera_id is not None:
+        msg["camera_id"] = camera_id
+        msg["camera_label"] = camera_label
+    manager.send_event(msg)
 
 
 def emit_detected(employee_id: int, employee_name: str, camera_id: int, camera_label: str, confidence: float) -> None:

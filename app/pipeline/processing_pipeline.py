@@ -12,7 +12,7 @@ from app.config import settings
 # ── Recognition worker ────────────────────────────────────────────────────────
 # InsightFace runs in its own thread — pipeline loop never waits for it.
 # Queue item: (camera_id, frame, tracks_needing_recognition)
-_recognition_queue: queue.Queue = queue.Queue(maxsize=4)
+_recognition_queue: queue.Queue = queue.Queue(maxsize=20)
 
 
 def _recognition_worker() -> None:
@@ -22,7 +22,7 @@ def _recognition_worker() -> None:
         except queue.Empty:
             continue
 
-        camera_id, frame, tracks = item
+        camera_id, frame, tracks, attend_last = item
         try:
             from app.recognition.face_recognizer import face_recognizer
             if face_recognizer is not None:
@@ -50,6 +50,21 @@ def _recognition_worker() -> None:
                             emit_detected(result.employee_id, name, camera_id, label, result.confidence)
                         except Exception:
                             pass
+
+                        # Immediately trigger attendance — no waiting for next pipeline cycle
+                        dkey = (result.employee_id, camera_id)
+                        now = time.monotonic()
+                        if now - attend_last.get(dkey, 0) >= ProcessingPipeline._ATTEND_DEBOUNCE:
+                            attend_last[dkey] = now
+                            try:
+                                from app.store import state as _state2
+                                cam2 = _state2.get_camera(camera_id)
+                                loc = cam2["location_label"] if cam2 else ""
+                                _attendance_queue.put_nowait((result.employee_id, camera_id, loc))
+                            except queue.Full:
+                                logger.warning(f"Attendance queue full — dropping event emp={result.employee_id}")
+                            except Exception as _ae:
+                                logger.warning(f"Attendance trigger error: {_ae}")
 
                 # WS: unknown persons (tracks with no result after max attempts)
                 # Emit once when a track exhausts all attempts without recognition
@@ -108,12 +123,12 @@ class ProcessingPipeline:
     """
 
     # ── Timing ──────────────────────────────────────────────────────────────
-    _PIPELINE_INTERVAL = 0.33   # ~3 pipeline cycles/sec
-    _DETECT_EVERY      = 3      # YOLO every 3 cycles → ~1 detection/sec (biggest impact)
-    # At 1 YOLO/sec: person in frame for 2s = 2 detections — reliable enough for entry/exit
+    _PIPELINE_INTERVAL = 0.20   # ~5 pipeline cycles/sec
+    _DETECT_EVERY      = 1      # YOLO every cycle → ~5 detections/sec (fast scan)
+    # Detect every cycle so a person walking past is reliably caught
 
     # ── Recognition ─────────────────────────────────────────────────────────
-    _RECOG_FRESH_EVERY = 2      # cycles between recognition for fresh tracks (0–2 attempts)
+    _RECOG_FRESH_EVERY = 1      # try recognition every cycle for fresh tracks
     _RECOG_STALE_EVERY = 6      # cycles between recognition for stale tracks (3–9 attempts)
     _RECOG_MAX_ATTEMPTS = 10    # give up after N full-frame attempts
 
@@ -268,12 +283,13 @@ class ProcessingPipeline:
 
         if to_recognize:
             try:
-                _recognition_queue.put_nowait((self.camera_id, frame.copy(), to_recognize))
+                _recognition_queue.put_nowait((self.camera_id, frame.copy(), to_recognize, self._attend_last))
                 for t in to_recognize:
                     key = f"{t.track_id}@{self.camera_id}"
                     self._recog_attempts[key] = self._recog_attempts.get(key, 0) + 1
             except queue.Full:
-                pass   # worker busy — try next cycle
+                logger.warning(f"Recognition queue full cam={self.camera_id} — skipping cycle")
+
 
         # ── Step 4: Attendance (debounced, non-blocking DB write) ─────────
         now = time.monotonic()
