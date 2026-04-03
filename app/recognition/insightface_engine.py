@@ -86,21 +86,33 @@ class InsightFaceEngine:
     ) -> tuple[int | None, float]:
         """
         Compare embedding against all stored embeddings for every employee.
-        Each employee may have multiple embeddings (different angles).
-        Returns (best_employee_id, best_score) — best score across all angles.
+        Returns (best_employee_id, best_score).
         Returns (None, 0.0) if store is empty.
         """
-        if not store:
+        results = self.match_top_n(embedding, store, n=1)
+        if not results:
             return None, 0.0
+        return results[0]
 
-        best_id: int | None = None
-        best_score: float = -1.0
+    def match_top_n(
+        self,
+        embedding: np.ndarray,
+        store: dict[int, list[np.ndarray]],
+        n: int = 3,
+    ) -> list[tuple[int, float]]:
+        """
+        Return top-N (employee_id, best_score) candidates sorted by score descending.
+        Each employee contributes only their best embedding score.
+        """
+        if not store:
+            return []
 
+        per_employee: dict[int, float] = {}
         for emp_id, ref_embeddings in store.items():
             for ref_emb in ref_embeddings:
                 score = cosine_similarity(embedding, ref_emb)
-                if score > best_score:
-                    best_score = score
-                    best_id = emp_id
+                if score > per_employee.get(emp_id, -1.0):
+                    per_employee[emp_id] = score
 
-        return best_id, best_score
+        sorted_candidates = sorted(per_employee.items(), key=lambda x: x[1], reverse=True)
+        return sorted_candidates[:n]

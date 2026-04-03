@@ -38,7 +38,7 @@ class FaceRecognizer:
 
     # Full-frame thresholds — faces are smaller, angles vary, so slightly lower
     FRAME_HIGH_THRESHOLD   = 0.52
-    FRAME_MEDIUM_THRESHOLD = 0.30   # try DeepFace verification for any score >= 30%
+    FRAME_MEDIUM_THRESHOLD = 0.38   # minimum InsightFace score to attempt DeepFace
 
     def __init__(
         self,
@@ -70,11 +70,9 @@ class FaceRecognizer:
             return IdentityResult(employee_id=best_id, confidence=best_score, method="insightface_high")
 
         if best_score >= self.MEDIUM_THRESHOLD:
-            ref_image = self._load_reference_image(best_id)
-            if ref_image is not None:
-                verified, distance = self._deepface.verify(face_crop, ref_image)
-                if verified:
-                    return IdentityResult(employee_id=best_id, confidence=best_score, method="insightface_medium+deepface")
+            verified, _ = self._verify_against_all(face_crop, best_id)
+            if verified:
+                return IdentityResult(employee_id=best_id, confidence=best_score, method="insightface_medium+deepface")
 
         logger.debug(f"FaceRecognizer.identify: unknown (score={best_score:.4f})")
         return None
@@ -192,26 +190,37 @@ class FaceRecognizer:
                 )
                 _snap(face_bbox_tuple, best_track.track_id, best_id, emp_name, best_score, "frame_high")
             elif best_score >= self.FRAME_MEDIUM_THRESHOLD:
-                ref_image = self._load_reference_image(best_id)
-                if ref_image is not None:
-                    h, w = frame.shape[:2]
-                    fc = frame[max(0, fy1):min(h, fy2), max(0, fx1):min(w, fx2)]
-                    if fc.size > 0:
-                        verified, dist_val = self._deepface.verify(fc, ref_image)
+                # Try top-3 candidates — top-1 may be wrong employee at similar score
+                h, w = frame.shape[:2]
+                fc = frame[max(0, fy1):min(h, fy2), max(0, fx1):min(w, fx2)]
+                if fc.size > 0:
+                    candidates = self._insight.match_top_n(embedding, all_embeddings, n=3)
+                    matched_candidate = None
+                    for cand_id, cand_score in candidates:
+                        if cand_score < self.FRAME_MEDIUM_THRESHOLD:
+                            break
+                        verified, _ = self._verify_against_all(fc, cand_id)
+                        logger.info(
+                            f"  deepface candidate emp={cand_id} score={cand_score:.4f} verified={verified}"
+                        )
                         if verified:
-                            emp_name = _snap_state.get_employee(best_id)
-                            emp_name = emp_name["name"] if emp_name else str(best_id)
-                            results[key] = IdentityResult(
-                                employee_id=best_id, confidence=best_score,
-                                method="frame_medium+deepface"
-                            )
-                            logger.info(
-                                f"identify_in_frame MATCH (deepface): cam={camera_id} "
-                                f"track={best_track.track_id} → emp={best_id}"
-                            )
-                            _snap(face_bbox_tuple, best_track.track_id, best_id, emp_name, best_score, "frame_medium+deepface")
-                        else:
-                            _snap(face_bbox_tuple, best_track.track_id, None, None, best_score, "unverified")
+                            matched_candidate = (cand_id, cand_score)
+                            break
+                    if matched_candidate:
+                        cand_id, cand_score = matched_candidate
+                        emp_name = _snap_state.get_employee(cand_id)
+                        emp_name = emp_name["name"] if emp_name else str(cand_id)
+                        results[key] = IdentityResult(
+                            employee_id=cand_id, confidence=cand_score,
+                            method="frame_medium+deepface"
+                        )
+                        logger.info(
+                            f"identify_in_frame MATCH (deepface): cam={camera_id} "
+                            f"track={best_track.track_id} → emp={cand_id}"
+                        )
+                        _snap(face_bbox_tuple, best_track.track_id, cand_id, emp_name, cand_score, "frame_medium+deepface")
+                    else:
+                        _snap(face_bbox_tuple, best_track.track_id, None, None, best_score, "unverified")
             else:
                 # score below both thresholds — unknown face
                 _snap(face_bbox_tuple, best_track.track_id, None, None, best_score, "unknown")
@@ -241,16 +250,14 @@ class FaceRecognizer:
                     )
                     snapshot_store.save(crop, camera_id, _cam_label(camera_id), best_id, emp_name, best_score, "crop_high")
                 elif best_score >= self.MEDIUM_THRESHOLD:
-                    ref_image = self._load_reference_image(best_id)
-                    if ref_image is not None:
-                        verified, _ = self._deepface.verify(crop, ref_image)
-                        if verified:
-                            emp_name = _snap_state.get_employee(best_id)
-                            emp_name = emp_name["name"] if emp_name else str(best_id)
-                            results[key] = IdentityResult(
-                                employee_id=best_id, confidence=best_score, method="crop_medium+deepface"
-                            )
-                            snapshot_store.save(crop, camera_id, _cam_label(camera_id), best_id, emp_name, best_score, "crop_medium+deepface")
+                    verified, _ = self._verify_against_all(crop, best_id)
+                    if verified:
+                        emp_name = _snap_state.get_employee(best_id)
+                        emp_name = emp_name["name"] if emp_name else str(best_id)
+                        results[key] = IdentityResult(
+                            employee_id=best_id, confidence=best_score, method="crop_medium+deepface"
+                        )
+                        snapshot_store.save(crop, camera_id, _cam_label(camera_id), best_id, emp_name, best_score, "crop_medium+deepface")
 
         return results
 
@@ -268,17 +275,34 @@ class FaceRecognizer:
         crop = frame[y1:y2, x1:x2]
         return crop if crop.size > 0 else None
 
-    def _load_reference_image(self, employee_id: int) -> np.ndarray | None:
-        """Load first available face photo for this employee (photo_1.jpg, photo_2.jpg, ...)."""
+    def _load_all_reference_images(self, employee_id: int) -> list[np.ndarray]:
+        """Load ALL registered face photos for this employee."""
         emp_dir = self._faces_dir / str(employee_id)
-        # Try numbered photos first (new format), then legacy photo.jpg
-        for name in ["photo_1.jpg", "photo_2.jpg", "photo_3.jpg", "photo.jpg"]:
+        images = []
+        for name in ["photo_1.jpg", "photo_2.jpg", "photo_3.jpg", "photo_4.jpg", "photo_5.jpg", "photo.jpg"]:
             img_path = emp_dir / name
             if img_path.exists():
                 img = cv2.imread(str(img_path))
                 if img is not None:
-                    return img
-        return None
+                    images.append(img)
+        return images
+
+    def _verify_against_all(self, face_crop: np.ndarray, employee_id: int) -> tuple[bool, float]:
+        """
+        Verify face_crop against ALL registered photos for the employee.
+        Returns (verified, best_similarity) — passes if ANY photo verifies.
+        """
+        refs = self._load_all_reference_images(employee_id)
+        if not refs:
+            return False, 0.0
+        best = 0.0
+        for ref in refs:
+            verified, sim = self._deepface.verify(face_crop, ref)
+            if sim > best:
+                best = sim
+            if verified:
+                return True, best
+        return False, best
 
 
 # Singleton — set in main.py lifespan, imported by pipeline

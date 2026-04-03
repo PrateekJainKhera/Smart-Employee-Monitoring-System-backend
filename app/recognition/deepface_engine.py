@@ -5,12 +5,12 @@ Replaces DeepFace (which requires TensorFlow — no Python 3.14 build available)
 Uses the same interface: verify(face_img, reference_img) → (bool, float)
 
 Model: InceptionResnetV1 pretrained on VGGFace2 → 512-dim embeddings
-Verification: cosine similarity, threshold 0.6
+Verification: cosine similarity, threshold 0.5
 """
 import numpy as np
 from app.utils.logger import logger
 
-VERIFY_THRESHOLD = 0.60  # cosine similarity — above this = same person
+VERIFY_THRESHOLD = 0.55  # cosine similarity — above this = same person
 
 
 class DeepFaceEngine:
