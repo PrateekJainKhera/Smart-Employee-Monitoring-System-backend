@@ -143,6 +143,11 @@ async def register_face(
     if not result["success"]:
         raise HTTPException(status_code=422, detail=result["error"])
 
+    # Invalidate cached reference images so FaceNet picks up the new photo
+    _, fr = _get_services()
+    if fr is not None:
+        fr.invalidate_ref_cache(employee_id)
+
     logger.info(f"Face photo {result['total_photos']} registered for employee {employee_id}")
     return {
         "message": f"Face photo {result['total_photos']} registered successfully",
@@ -219,6 +224,12 @@ def delete_face_photo(
     removed = svc.delete_single_photo(employee_id, photo_index, state)
     if not removed:
         raise HTTPException(status_code=404, detail=f"Photo {photo_index} not found")
+
+    # Invalidate cached reference images so deleted photo is no longer used
+    _, fr = _get_services()
+    if fr is not None:
+        fr.invalidate_ref_cache(employee_id)
+
     remaining = svc.get_face_photos(employee_id)
     return {
         "message": f"Photo {photo_index} deleted",

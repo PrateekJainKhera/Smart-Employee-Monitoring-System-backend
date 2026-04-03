@@ -128,8 +128,8 @@ class ProcessingPipeline:
     # Detect every cycle so a person walking past is reliably caught
 
     # ── Recognition ─────────────────────────────────────────────────────────
-    _RECOG_FRESH_EVERY = 1      # try recognition every cycle for fresh tracks
-    _RECOG_STALE_EVERY = 6      # cycles between recognition for stale tracks (3–9 attempts)
+    _RECOG_FRESH_EVERY = 2      # try recognition every 2 cycles for fresh tracks
+    _RECOG_STALE_EVERY = 10     # cycles between recognition for stale tracks (3–9 attempts)
     _RECOG_MAX_ATTEMPTS = 10    # give up after N full-frame attempts
 
     # ── Safety ──────────────────────────────────────────────────────────────

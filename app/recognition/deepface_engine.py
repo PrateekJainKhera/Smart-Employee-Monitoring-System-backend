@@ -10,7 +10,7 @@ Verification: cosine similarity, threshold 0.5
 import numpy as np
 from app.utils.logger import logger
 
-VERIFY_THRESHOLD = 0.55  # cosine similarity — above this = same person
+VERIFY_THRESHOLD = 0.50  # cosine similarity — above this = same person
 
 
 class DeepFaceEngine:

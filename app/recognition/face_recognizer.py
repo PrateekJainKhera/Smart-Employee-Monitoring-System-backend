@@ -51,6 +51,7 @@ class FaceRecognizer:
         self._deepface = deepface_engine
         self._store = embedding_store
         self._faces_dir = Path(faces_dir)
+        self._ref_cache: dict[int, list[np.ndarray]] = {}  # employee_id → loaded images
 
     def identify(self, face_crop: np.ndarray) -> IdentityResult | None:
         """Identify who is in a close-up face crop."""
@@ -276,7 +277,9 @@ class FaceRecognizer:
         return crop if crop.size > 0 else None
 
     def _load_all_reference_images(self, employee_id: int) -> list[np.ndarray]:
-        """Load ALL registered face photos for this employee."""
+        """Load ALL registered face photos for this employee — cached in memory after first load."""
+        if employee_id in self._ref_cache:
+            return self._ref_cache[employee_id]
         emp_dir = self._faces_dir / str(employee_id)
         images = []
         for name in ["photo_1.jpg", "photo_2.jpg", "photo_3.jpg", "photo_4.jpg", "photo_5.jpg", "photo.jpg"]:
@@ -285,7 +288,15 @@ class FaceRecognizer:
                 img = cv2.imread(str(img_path))
                 if img is not None:
                     images.append(img)
+        self._ref_cache[employee_id] = images
         return images
+
+    def invalidate_ref_cache(self, employee_id: int | None = None) -> None:
+        """Clear cached reference images — call after adding/deleting employee photos."""
+        if employee_id is None:
+            self._ref_cache.clear()
+        else:
+            self._ref_cache.pop(employee_id, None)
 
     def _verify_against_all(self, face_crop: np.ndarray, employee_id: int) -> tuple[bool, float]:
         """
