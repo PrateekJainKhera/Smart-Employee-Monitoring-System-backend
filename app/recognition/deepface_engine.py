@@ -9,6 +9,7 @@ Verification: cosine similarity, threshold 0.5
 """
 import numpy as np
 from app.utils.logger import logger
+from app.recognition.insightface_engine import _normalize_brightness
 
 VERIFY_THRESHOLD = 0.50  # cosine similarity — above this = same person
 
@@ -82,6 +83,8 @@ class DeepFaceEngine:
             from PIL import Image
             import torchvision.transforms as transforms
 
+            # Normalize brightness before embedding (helps dark frames)
+            img = _normalize_brightness(img)
             # BGR → RGB → PIL
             rgb = img[:, :, ::-1].copy()
             pil = Image.fromarray(rgb).resize((160, 160))

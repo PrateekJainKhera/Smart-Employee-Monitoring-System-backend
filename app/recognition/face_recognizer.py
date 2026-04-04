@@ -38,7 +38,7 @@ class FaceRecognizer:
 
     # Full-frame thresholds — faces are smaller, angles vary, so slightly lower
     FRAME_HIGH_THRESHOLD   = 0.52
-    FRAME_MEDIUM_THRESHOLD = 0.38   # minimum InsightFace score to attempt DeepFace
+    FRAME_MEDIUM_THRESHOLD = 0.35   # minimum InsightFace score to attempt DeepFace
 
     def __init__(
         self,
@@ -197,14 +197,17 @@ class FaceRecognizer:
                 if fc.size > 0:
                     candidates = self._insight.match_top_n(embedding, all_embeddings, n=3)
                     matched_candidate = None
+                    # Require higher FaceNet confidence when InsightFace score is low
+                    facenet_min = 0.56 if best_score < 0.42 else 0.50
                     for cand_id, cand_score in candidates:
                         if cand_score < self.FRAME_MEDIUM_THRESHOLD:
                             break
-                        verified, _ = self._verify_against_all(fc, cand_id)
+                        verified, sim = self._verify_against_all(fc, cand_id)
                         logger.info(
-                            f"  deepface candidate emp={cand_id} score={cand_score:.4f} verified={verified}"
+                            f"  deepface candidate emp={cand_id} score={cand_score:.4f} "
+                            f"verified={verified} sim={sim:.4f} facenet_min={facenet_min:.2f}"
                         )
-                        if verified:
+                        if verified and sim >= facenet_min:
                             matched_candidate = (cand_id, cand_score)
                             break
                     if matched_candidate:
@@ -222,9 +225,10 @@ class FaceRecognizer:
                         _snap(face_bbox_tuple, best_track.track_id, cand_id, emp_name, cand_score, "frame_medium+deepface")
                     else:
                         _snap(face_bbox_tuple, best_track.track_id, None, None, best_score, "unverified")
-            else:
-                # score below both thresholds — unknown face
+            elif best_score >= 0.20:
+                # score below both thresholds but not pure noise — save for debug
                 _snap(face_bbox_tuple, best_track.track_id, None, None, best_score, "unknown")
+            # else: score < 0.20 — completely dark/noisy frame, skip entirely
 
         # ── Fallback: head-crop for unmatched tracks ───────────────────────
         # Any track whose face InsightFace didn't detect in the full frame

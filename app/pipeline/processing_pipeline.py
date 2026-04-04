@@ -31,11 +31,20 @@ def _recognition_worker() -> None:
                 recognized_track_ids: set = set()
                 for key, result in results.items():
                     recognized_track_ids.add(key)
-                    if app_state.get_track_identity(key) is None:
+                    existing = app_state.get_track_identity(key)
+                    # Allow correction if a high-confidence result contradicts cached identity
+                    is_new        = existing is None
+                    is_correction = (
+                        existing is not None
+                        and existing != result.employee_id
+                        and result.method in ("frame_high", "insightface_high", "crop_high")
+                    )
+                    if is_new or is_correction:
                         app_state.set_track_identity(key, result.employee_id)
                         track_id, _ = key.split("@")
+                        tag = "CORRECTED" if is_correction else "Recognized"
                         logger.info(
-                            f"Recognized cam={camera_id} track={track_id} "
+                            f"{tag} cam={camera_id} track={track_id} "
                             f"→ employee_id={result.employee_id} "
                             f"conf={result.confidence:.2f} method={result.method}"
                         )

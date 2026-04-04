@@ -5,12 +5,29 @@ Uses InsightFace buffalo_s model (fast, CPU-friendly).
 Outputs 512-dim normalized embeddings compared via cosine similarity.
 """
 import numpy as np
+import cv2
 from app.utils.logger import logger
 from app.utils.helpers import cosine_similarity
 
 
+def _normalize_brightness(img: np.ndarray) -> np.ndarray:
+    """
+    Apply CLAHE to LAB lightness channel — boosts contrast in dark face images
+    without overexposing bright areas. Works on BGR numpy images.
+    """
+    try:
+        lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+        l = clahe.apply(l)
+        lab = cv2.merge((l, a, b))
+        return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+    except Exception:
+        return img  # fallback: return original if anything fails
+
+
 class InsightFaceEngine:
-    def __init__(self, model_name: str = "buffalo_s", det_size: tuple = (640, 640)):
+    def __init__(self, model_name: str = "buffalo_l", det_size: tuple = (640, 640)):
         self._app = None
         self._model_name = model_name
         self._det_size = det_size
