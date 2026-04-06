@@ -61,8 +61,9 @@ class CameraThread(threading.Thread):
                     self.is_connected = False
                     break
 
-                # Resize once here — all consumers (pipeline + streams) get 640px frames
-                frame = resize_frame(frame, width=640)
+                # Resize once here — all consumers (pipeline + streams) get 1280px frames
+                # buffalo_l benefits from higher resolution for angled/distant faces
+                frame = resize_frame(frame, width=1280)
                 frame_buffer.put_frame(self.camera_id, frame)
 
             cap.release()

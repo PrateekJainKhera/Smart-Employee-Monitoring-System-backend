@@ -31,6 +31,7 @@ def _recognition_worker() -> None:
                 recognized_track_ids: set = set()
                 for key, result in results.items():
                     recognized_track_ids.add(key)
+
                     existing = app_state.get_track_identity(key)
                     # Allow correction if a high-confidence result contradicts cached identity
                     is_new        = existing is None
@@ -57,6 +58,13 @@ def _recognition_worker() -> None:
                             name = emp["name"] if emp else str(result.employee_id)
                             from app.api.ws import emit_detected
                             emit_detected(result.employee_id, name, camera_id, label, result.confidence)
+                        except Exception:
+                            pass
+
+                        # Record sighting count for this employee + camera today
+                        try:
+                            from app.sightings.sighting_store import sighting_store
+                            sighting_store.record(result.employee_id, camera_id)
                         except Exception:
                             pass
 

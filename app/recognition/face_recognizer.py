@@ -36,9 +36,9 @@ class FaceRecognizer:
     HIGH_THRESHOLD   = 0.65
     MEDIUM_THRESHOLD = 0.50
 
-    # Full-frame thresholds — faces are smaller, angles vary, so slightly lower
-    FRAME_HIGH_THRESHOLD   = 0.52
-    FRAME_MEDIUM_THRESHOLD = 0.35   # minimum InsightFace score to attempt DeepFace
+    # Full-frame thresholds — buffalo_l trusted directly, no FaceNet needed above 0.45
+    FRAME_HIGH_THRESHOLD   = 0.45   # direct match — buffalo_l is accurate enough
+    FRAME_MEDIUM_THRESHOLD = 0.35   # minimum score to attempt FaceNet fallback
 
     def __init__(
         self,
@@ -286,7 +286,8 @@ class FaceRecognizer:
             return self._ref_cache[employee_id]
         emp_dir = self._faces_dir / str(employee_id)
         images = []
-        for name in ["photo_1.jpg", "photo_2.jpg", "photo_3.jpg", "photo_4.jpg", "photo_5.jpg", "photo.jpg"]:
+        for name in ["photo_1.jpg", "photo_2.jpg", "photo_3.jpg", "photo_4.jpg", "photo_5.jpg",
+                     "photo_6.jpg", "photo_7.jpg", "photo_8.jpg", "photo.jpg"]:
             img_path = emp_dir / name
             if img_path.exists():
                 img = cv2.imread(str(img_path))
