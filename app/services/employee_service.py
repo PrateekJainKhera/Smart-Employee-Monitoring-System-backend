@@ -54,19 +54,25 @@ class EmployeeService:
             return {"success": False, "error": "InsightFace engine not loaded"}
 
         embedding = self._insight.get_embedding(img)
-        if embedding is None:
-            return {"success": False, "error": "No face detected in the uploaded image"}
+        embedding_detected = embedding is not None
 
-        # 3. Append embedding
-        photo_index = self._store.photo_count(employee_id)  # 0-based index before add
-        total = self._store.add(employee_id, embedding)
-
-        # 4. Save image — photo_1.jpg, photo_2.jpg, ...
+        # 3. Save image always — even if no embedding detected
+        # Angled/chin-down photos are still useful for FaceNet reference matching
         img_dir = FACES_DIR / str(employee_id)
         img_dir.mkdir(parents=True, exist_ok=True)
-        save_path = img_dir / f"photo_{total}.jpg"
+        existing = sorted(img_dir.glob("photo_*.jpg"))
+        next_index = len(existing) + 1
+        save_path = img_dir / f"photo_{next_index}.jpg"
         cv2.imwrite(str(save_path), img)
-        logger.info(f"EmployeeService: saved face image to {save_path}")
+        logger.info(
+            f"EmployeeService: saved face image to {save_path} "
+            f"(embedding={'yes' if embedding_detected else 'no — angled photo, saved for FaceNet only'})"
+        )
+        total = next_index
+
+        # 4. Append embedding only if face was detected
+        if embedding_detected:
+            self._store.add(employee_id, embedding)
 
         # 5. Update AppState flag
         state.mark_face_registered(employee_id)
@@ -75,30 +81,32 @@ class EmployeeService:
         try:
             from app.database.connection import is_db_enabled, get_db
             if is_db_enabled():
-                emb_bytes = pickle.dumps(embedding)
                 with get_db() as conn:
                     cursor = conn.cursor()
                     cursor.execute(
                         "UPDATE employees SET face_registered=1 WHERE id=?", employee_id
                     )
-                    cursor.execute(
-                        "INSERT INTO face_embeddings (employee_id, embedding) VALUES (?, ?)",
-                        employee_id, emb_bytes,
-                    )
+                    if embedding_detected:
+                        emb_bytes = pickle.dumps(embedding)
+                        cursor.execute(
+                            "INSERT INTO face_embeddings (employee_id, embedding) VALUES (?, ?)",
+                            employee_id, emb_bytes,
+                        )
         except Exception as e:
             logger.warning(f"EmployeeService: DB face save failed (non-fatal): {e}")
 
         logger.info(
             f"EmployeeService: face registered for employee {employee_id} "
-            f"(photo {total}/{total})"
+            f"(photo {total}, embedding={'extracted' if embedding_detected else 'skipped — saved for FaceNet'})"
         )
         return {
             "success": True,
             "employee_id": employee_id,
             "photo_index": total,
             "total_photos": total,
-            "embedding_dim": len(embedding),
+            "embedding_dim": len(embedding) if embedding_detected else 0,
             "image_path": str(save_path),
+            "warning": None if embedding_detected else "Face not clearly detected — photo saved for angle reference",
         }
 
     def delete_face(self, employee_id: int, state: AppState) -> None:

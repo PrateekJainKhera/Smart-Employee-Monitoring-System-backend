@@ -134,7 +134,8 @@ async def register_face(
     if svc is None:
         raise HTTPException(status_code=503, detail="Face recognition service not initialized")
 
-    if not file.content_type or not file.content_type.startswith("image/"):
+    allowed = ("image/", "application/octet-stream")
+    if file.content_type and not any(file.content_type.startswith(a) for a in allowed):
         raise HTTPException(status_code=400, detail="File must be an image (JPEG/PNG)")
 
     image_bytes = await file.read()
