@@ -100,7 +100,7 @@ async def lifespan(app: FastAPI):
         def _auto_checkout_loop():
             import time as _time
             while True:
-                _time.sleep(60)
+                _time.sleep(30)
                 try:
                     from app.services.attendance_service import auto_checkout_stale
                     n = auto_checkout_stale()

@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     # At any time, if employee is out >= max_break_min → checkout (safety net)
     office_end_hour: int = 19       # 7 PM — end of workday
     office_end_break_min: int = 15  # minutes out after 7 PM before auto-checkout
-    max_break_min: int = 120        # max break at any time (2 hours safety net)
+    max_break_min: int = 75         # max break at any time — auto-checkout after 45 min away
 
     # Embeddings persistence
     embeddings_path: str = "data/embeddings.pkl"
