@@ -31,7 +31,14 @@ class CameraThread(threading.Thread):
             )
             cap = cv2.VideoCapture(source, cv2.CAP_FFMPEG)
         else:
-            cap = cv2.VideoCapture(source)
+            # CAP_DSHOW is required on Windows to avoid obsensor backend errors
+            cap = cv2.VideoCapture(source, cv2.CAP_DSHOW)
+            if not cap.isOpened() and source != 0:
+                cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+            # 720p @ 30fps — enough for buffalo_l, faster than 1080p on CPU
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1280)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            cap.set(cv2.CAP_PROP_FPS, 30)
 
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)   # keep only the latest frame in OpenCV buffer
         return cap

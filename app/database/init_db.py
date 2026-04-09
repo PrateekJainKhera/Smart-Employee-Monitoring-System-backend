@@ -60,11 +60,20 @@ BEGIN
         check_out       DATETIME2,
         total_hours     FLOAT,
         date            DATE            NOT NULL,
+        identified_by   NVARCHAR(20)    NULL,
         created_at      DATETIME2       NOT NULL DEFAULT GETUTCDATE(),
         CONSTRAINT fk_al_employee FOREIGN KEY (employee_id) REFERENCES employees(id),
         CONSTRAINT fk_al_camera   FOREIGN KEY (camera_id)   REFERENCES cameras(id)
     )
 END
+"""
+
+_ALTER_ATTENDANCE_IDENTIFIED_BY = """
+IF NOT EXISTS (
+    SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_NAME='attendance_logs' AND COLUMN_NAME='identified_by'
+)
+    ALTER TABLE attendance_logs ADD identified_by NVARCHAR(20) NULL
 """
 
 _CREATE_BREAK_LOGS = """
@@ -117,6 +126,8 @@ def create_tables(conn: pyodbc.Connection) -> None:
     for table_name, sql in _TABLES:
         cursor.execute(sql)
         logger.info(f"DB: table '{table_name}' ready")
+    # Migrations — add columns to existing tables if missing
+    cursor.execute(_ALTER_ATTENDANCE_IDENTIFIED_BY)
     conn.commit()
     cursor.close()
     logger.info("DB: all tables initialized")

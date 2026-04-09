@@ -36,10 +36,16 @@ def _is_debounced(employee_id: int, camera_id: int) -> bool:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def handle_event(employee_id: int, camera_id: int, location_label: str) -> None:
+def handle_event(
+    employee_id: int,
+    camera_id: int,
+    location_label: str,
+    identified_by: str = "face",
+) -> None:
     """
     Called by the pipeline every time an identified employee is seen on a camera.
     Routes to the appropriate attendance logic based on the camera's location label.
+    identified_by: 'face' | 'clothing_assist' — how the employee was recognized.
     No-op if DATABASE_URL is not configured.
     """
     from app.database.connection import is_db_enabled
@@ -57,7 +63,7 @@ def handle_event(employee_id: int, camera_id: int, location_label: str) -> None:
             today = now.date()
 
             if location_label == "entry":
-                _handle_entry(cursor, employee_id, camera_id, now, today)
+                _handle_entry(cursor, employee_id, camera_id, now, today, identified_by)
             elif location_label == "exit":
                 _handle_exit(cursor, employee_id, camera_id, now, today)
             else:
@@ -125,7 +131,7 @@ def list_attendance(target_date: Optional[date] = None) -> list[dict]:
         cursor = conn.cursor()
         cursor.execute(
             "SELECT al.id, al.employee_id, e.name, al.check_in, al.check_out, "
-            "       al.total_hours, al.date, "
+            "       al.total_hours, al.date, al.identified_by, "
             "       (SELECT COUNT(*) FROM break_logs bl WHERE bl.attendance_log_id = al.id) AS break_count, "
             "       (SELECT COUNT(*) FROM break_logs bl WHERE bl.attendance_log_id = al.id AND bl.break_end IS NULL) AS open_breaks "
             "FROM attendance_logs al "
@@ -144,8 +150,9 @@ def list_attendance(target_date: Optional[date] = None) -> list[dict]:
                 "check_out": r[4].isoformat() + "Z" if r[4] else None,
                 "total_hours": r[5],
                 "date": str(r[6]),
-                "break_count": r[7],
-                "on_break": r[4] is None and r[8] > 0,
+                "identified_by": r[7],
+                "break_count": r[8],
+                "on_break": r[4] is None and r[9] > 0,
             }
             for r in rows
         ]
@@ -232,16 +239,16 @@ def _get_employee_name(employee_id: int) -> str:
     return emp["name"] if emp else str(employee_id)
 
 
-def _handle_entry(cursor, employee_id: int, camera_id: int, now: datetime, today: date) -> None:
+def _handle_entry(cursor, employee_id: int, camera_id: int, now: datetime, today: date, identified_by: str = "face") -> None:
     log = _get_open_attendance(cursor, employee_id, today)
     name = _get_employee_name(employee_id)
 
     if log is None:
         # First check-in of the day
         cursor.execute(
-            "INSERT INTO attendance_logs (employee_id, camera_id, check_in, date) "
-            "VALUES (?, ?, ?, ?)",
-            employee_id, camera_id, now, today,
+            "INSERT INTO attendance_logs (employee_id, camera_id, check_in, date, identified_by) "
+            "VALUES (?, ?, ?, ?, ?)",
+            employee_id, camera_id, now, today, identified_by,
         )
         logger.info(f"Attendance: employee {employee_id} checked IN at {now.strftime('%H:%M:%S')}")
         try:

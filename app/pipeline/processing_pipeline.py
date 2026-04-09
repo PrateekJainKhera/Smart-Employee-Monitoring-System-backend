@@ -25,6 +25,35 @@ def _recognition_worker() -> None:
         camera_id, frame, tracks, attend_last = item
         try:
             from app.recognition.face_recognizer import face_recognizer
+            from app.config import settings as _settings
+
+            # ── Clothing signature collection (face_clothing mode only) ──────
+            # Histograms are extracted ONCE per track (first sighting only).
+            # Subsequent cycles just touch last_seen — no expensive cv2.calcHist.
+            if _settings.recognition_mode != "face_only":
+                try:
+                    from app.clothing.color_histogram import extract_clothing_histogram
+                    from app.clothing.track_store import clothing_track_store
+                    from datetime import datetime as _dt
+                    now = _dt.utcnow()
+                    for track in tracks:
+                        if clothing_track_store.has_histogram(camera_id, track.track_id):
+                            # Already have clothing signature — just keep track alive
+                            clothing_track_store.upsert(camera_id, track.track_id, None, now)
+                            continue
+                        # First sighting — extract histogram once
+                        h, w = frame.shape[:2]
+                        x1 = max(0, int(track.bbox[0]))
+                        y1 = max(0, int(track.bbox[1]))
+                        x2 = min(w, int(track.bbox[2]))
+                        y2 = min(h, int(track.bbox[3]))
+                        person_crop = frame[y1:y2, x1:x2]
+                        hist = extract_clothing_histogram(person_crop)
+                        if hist is not None:
+                            clothing_track_store.upsert(camera_id, track.track_id, hist, now)
+                except Exception as _ce:
+                    logger.debug(f"Clothing collection error: {_ce}")
+
             if face_recognizer is not None:
                 results = face_recognizer.identify_in_frame(frame, tracks, camera_id)
 
@@ -68,6 +97,38 @@ def _recognition_worker() -> None:
                         except Exception:
                             pass
 
+                        # ── Retroactive track linking (face_clothing mode) ───
+                        # Find earlier anonymous tracks with matching clothing
+                        # and record sightings back to first_seen time
+                        if _settings.recognition_mode != "face_only":
+                            try:
+                                from app.clothing.track_store import clothing_track_store
+                                curr_key = (camera_id, int(track_id))
+                                curr_track = clothing_track_store._tracks.get(curr_key)
+                                if curr_track and curr_track["histogram"] is not None:
+                                    matches = clothing_track_store.find_matching_tracks(
+                                        curr_track["histogram"],
+                                        camera_id,
+                                        int(track_id),
+                                    )
+                                    for match in matches:
+                                        clothing_track_store.assign_employee(
+                                            match["camera_id"],
+                                            match["track_id"],
+                                            result.employee_id,
+                                        )
+                                        logger.info(
+                                            f"ClothingReID: linked track={match['track_id']} "
+                                            f"→ emp={result.employee_id} "
+                                            f"first_seen={match['first_seen'].strftime('%H:%M:%S')} "
+                                            f"sim={match['similarity']:.2f}"
+                                        )
+                                    clothing_track_store.assign_employee(
+                                        camera_id, int(track_id), result.employee_id
+                                    )
+                            except Exception as _re:
+                                logger.debug(f"ReID linking error: {_re}")
+
                         # Immediately trigger attendance — no waiting for next pipeline cycle
                         dkey = (result.employee_id, camera_id)
                         now = time.monotonic()
@@ -77,7 +138,8 @@ def _recognition_worker() -> None:
                                 from app.store import state as _state2
                                 cam2 = _state2.get_camera(camera_id)
                                 loc = cam2["location_label"] if cam2 else ""
-                                _attendance_queue.put_nowait((result.employee_id, camera_id, loc))
+                                identified_by = "clothing_assist" if result.method == "clothing_reid" else "face"
+                                _attendance_queue.put_nowait((result.employee_id, camera_id, loc, identified_by))
                             except queue.Full:
                                 logger.warning(f"Attendance queue full — dropping event emp={result.employee_id}")
                             except Exception as _ae:
@@ -106,10 +168,10 @@ def _attendance_worker() -> None:
         except queue.Empty:
             continue
 
-        employee_id, camera_id, location_label = item
+        employee_id, camera_id, location_label, identified_by = item
         try:
             from app.services.attendance_service import handle_event
-            handle_event(employee_id, camera_id, location_label)
+            handle_event(employee_id, camera_id, location_label, identified_by)
         except Exception as e:
             logger.warning(f"Attendance worker error: {e}")
         finally:
@@ -320,7 +382,7 @@ class ProcessingPipeline:
                 continue
             self._attend_last[dkey] = now
             try:
-                _attendance_queue.put_nowait((emp, self.camera_id, self.location_label))
+                _attendance_queue.put_nowait((emp, self.camera_id, self.location_label, "face"))
             except queue.Full:
                 pass
 

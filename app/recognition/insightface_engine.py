@@ -40,7 +40,8 @@ class InsightFaceEngine:
                 name=self._model_name,
                 providers=["CPUExecutionProvider"],
             )
-            self._app.prepare(ctx_id=0, det_size=self._det_size)
+            # det_thresh=0.3 (default 0.5) — detects angled/partial faces from CCTV
+            self._app.prepare(ctx_id=0, det_size=self._det_size, det_thresh=0.3)
             logger.info(f"InsightFaceEngine loaded model '{self._model_name}'")
         except Exception as e:
             logger.error(f"InsightFaceEngine failed to load: {e}")

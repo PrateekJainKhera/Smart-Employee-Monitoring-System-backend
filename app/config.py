@@ -23,7 +23,18 @@ class Settings(BaseSettings):
     # At any time, if employee is out >= max_break_min → checkout (safety net)
     office_end_hour: int = 19       # 7 PM — end of workday
     office_end_break_min: int = 15  # minutes out after 7 PM before auto-checkout
-    max_break_min: int = 75         # max break at any time — auto-checkout after 45 min away
+    max_break_min: int = 45         # max break at any time — auto-checkout after 45 min away
+
+    # Recognition mode
+    # face_only        — face recognition only (default, best for uniform companies)
+    # face_clothing    — face primary + color histogram to link anonymous tracks
+    # face_reid        — face primary + OSNet ReID embeddings (future)
+    recognition_mode: str = "face_only"
+
+    # Clothing ReID settings (used when recognition_mode != face_only)
+    reid_similarity_threshold: float = 0.75   # min histogram similarity to link tracks
+    reid_time_window_min: int = 60            # max minutes back to search for matching track
+    reid_same_camera_only: bool = True        # only link tracks from same camera
 
     # Embeddings persistence
     embeddings_path: str = "data/embeddings.pkl"

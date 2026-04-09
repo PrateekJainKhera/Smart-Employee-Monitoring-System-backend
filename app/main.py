@@ -10,7 +10,7 @@ from app.utils.logger import setup_logger, logger
 from app.camera.camera_manager import camera_manager
 from app.pipeline.processing_pipeline import pipeline_manager
 from app.store import state
-from app.api import employees, cameras, attendance, reports, snapshots, sightings
+from app.api import employees, cameras, attendance, reports, snapshots, sightings, settings as settings_api
 from app.api import ws as ws_module
 import app.recognition.face_recognizer as _fr_module
 import app.services.employee_service as _es_module
@@ -170,5 +170,6 @@ app.include_router(cameras.router,    prefix="/api/v1")
 app.include_router(attendance.router, prefix="/api/v1")
 app.include_router(reports.router,    prefix="/api/v1")
 app.include_router(snapshots.router,  prefix="/api/v1")
-app.include_router(sightings.router,  prefix="/api/v1")
+app.include_router(sightings.router,     prefix="/api/v1")
+app.include_router(settings_api.router, prefix="/api/v1")
 app.include_router(ws_module.router)   # WS lives at /ws/live (no /api/v1 prefix)
