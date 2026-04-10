@@ -9,16 +9,32 @@ from app.tracking.tracker import EmployeeTracker, Track
 from app.store import state as app_state
 from app.config import settings
 
-# ── Recognition worker ────────────────────────────────────────────────────────
-# InsightFace runs in its own thread — pipeline loop never waits for it.
-# Queue item: (camera_id, frame, tracks_needing_recognition)
-_recognition_queue: queue.Queue = queue.Queue(maxsize=20)
+# ── Per-camera recognition queues and workers ─────────────────────────────────
+# Each camera gets its own queue + thread so cameras never block each other.
+# Queue size=2: drop stale frames immediately, always process the freshest.
+_recognition_queues: dict[int, queue.Queue] = {}
+_recognition_queue_lock = threading.Lock()
 
 
-def _recognition_worker() -> None:
+def _get_or_create_recognition_queue(camera_id: int) -> queue.Queue:
+    with _recognition_queue_lock:
+        if camera_id not in _recognition_queues:
+            q: queue.Queue = queue.Queue(maxsize=4)
+            _recognition_queues[camera_id] = q
+            threading.Thread(
+                target=_recognition_worker,
+                args=(q,),
+                daemon=True,
+                name=f"recognition-worker-cam{camera_id}",
+            ).start()
+            logger.info(f"Recognition worker started for cam={camera_id}")
+        return _recognition_queues[camera_id]
+
+
+def _recognition_worker(q: queue.Queue) -> None:
     while True:
         try:
-            item = _recognition_queue.get(timeout=1)
+            item = q.get(timeout=1)
         except queue.Empty:
             continue
 
@@ -154,7 +170,7 @@ def _recognition_worker() -> None:
         except Exception as e:
             logger.warning(f"Recognition worker error: {e}")
         finally:
-            _recognition_queue.task_done()
+            q.task_done()
 
 
 # ── Attendance worker ─────────────────────────────────────────────────────────
@@ -178,8 +194,7 @@ def _attendance_worker() -> None:
             _attendance_queue.task_done()
 
 
-threading.Thread(target=_recognition_worker, daemon=True, name="recognition-worker").start()
-threading.Thread(target=_attendance_worker,  daemon=True, name="attendance-worker").start()
+threading.Thread(target=_attendance_worker, daemon=True, name="attendance-worker").start()
 
 
 class ProcessingPipeline:
@@ -203,8 +218,7 @@ class ProcessingPipeline:
 
     # ── Timing ──────────────────────────────────────────────────────────────
     _PIPELINE_INTERVAL = 0.20   # ~5 pipeline cycles/sec
-    _DETECT_EVERY      = 1      # YOLO every cycle → ~5 detections/sec (fast scan)
-    # Detect every cycle so a person walking past is reliably caught
+    _DETECT_EVERY      = 2      # YOLO every 2 cycles → ~2.5 detections/sec, saves CPU on 3 cameras
 
     # ── Recognition ─────────────────────────────────────────────────────────
     _RECOG_FRESH_EVERY = 2      # try recognition every 2 cycles for fresh tracks
@@ -212,7 +226,7 @@ class ProcessingPipeline:
     _RECOG_MAX_ATTEMPTS = 10    # give up after N full-frame attempts
 
     # ── Safety ──────────────────────────────────────────────────────────────
-    _MAX_TRACKS      = 6        # only run recognition on the N closest persons per frame
+    _MAX_TRACKS      = 3        # only run recognition on the N closest persons per frame
     _ATTEND_DEBOUNCE = 30       # seconds between attendance queue pushes per employee
 
     # ── FPS monitor ─────────────────────────────────────────────────────────
@@ -362,7 +376,8 @@ class ProcessingPipeline:
 
         if to_recognize:
             try:
-                _recognition_queue.put_nowait((self.camera_id, frame.copy(), to_recognize, self._attend_last))
+                q = _get_or_create_recognition_queue(self.camera_id)
+                q.put_nowait((self.camera_id, frame.copy(), to_recognize, self._attend_last))
                 for t in to_recognize:
                     key = f"{t.track_id}@{self.camera_id}"
                     self._recog_attempts[key] = self._recog_attempts.get(key, 0) + 1

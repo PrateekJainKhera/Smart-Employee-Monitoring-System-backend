@@ -4,9 +4,10 @@ FaceRecognizer — orchestrator combining InsightFace (primary) + FaceNet (fallb
 Flow (full-frame, identify_in_frame):
   1. InsightFace.get_faces(full_frame) → all face bboxes + embeddings in one pass
   2. Each face spatially matched to nearest DeepSORT track
-  3. score >= FRAME_HIGH_THRESHOLD (0.55)  → confident match
-  4. FRAME_MED_THRESHOLD (0.42) <= score   → DeepFace fallback
-  5. score < FRAME_MED_THRESHOLD           → unknown
+  3. score >= FRAME_HIGH_THRESHOLD (0.50)     → confident match, skip FaceNet
+  4. score >= FRAME_VERIFIED_THRESHOLD (0.40) → borderline, run FaceNet to confirm
+  5. score >= FRAME_MEDIUM_THRESHOLD (0.35)   → low confidence, try top-3 + FaceNet
+  6. score < FRAME_MEDIUM_THRESHOLD           → unknown
 
 Flow (crop, identify — used for registration verification):
   1. InsightFace.get_embedding(crop) → single embedding
@@ -36,9 +37,10 @@ class FaceRecognizer:
     HIGH_THRESHOLD   = 0.65
     MEDIUM_THRESHOLD = 0.50
 
-    # Full-frame thresholds — buffalo_l trusted directly, no FaceNet needed above 0.45
-    FRAME_HIGH_THRESHOLD   = 0.45   # direct match — buffalo_l is accurate enough
-    FRAME_MEDIUM_THRESHOLD = 0.35   # minimum score to attempt FaceNet fallback
+    # Full-frame thresholds
+    FRAME_HIGH_THRESHOLD     = 0.55  # direct match — truly confident, skip FaceNet
+    FRAME_VERIFIED_THRESHOLD = 0.40  # borderline — run FaceNet to confirm before accepting
+    FRAME_MEDIUM_THRESHOLD   = 0.35  # minimum score to attempt FaceNet fallback
 
     def __init__(
         self,
@@ -165,6 +167,18 @@ class FaceRecognizer:
 
             if best_track is None:
                 logger.info(f"  face bbox=({fx1},{fy1},{fx2},{fy2}) — no track within {_MAX_ASSIGN_DIST}px")
+                # Still save a snapshot of this detected face for visibility
+                h, w = frame.shape[:2]
+                pad = 8
+                uc = frame[max(0, fy1 - pad):min(h, fy2 + pad),
+                           max(0, fx1 - pad):min(w, fx2 + pad)]
+                if uc.size > 0:
+                    untrack_key = f"untracked@{camera_id}"
+                    if snapshot_store.should_save(untrack_key):
+                        embedding = face["embedding"]
+                        best_id, best_score = self._insight.match(embedding, all_embeddings)
+                        snapshot_store.save(uc, camera_id, _cam_label(camera_id),
+                                            None, None, best_score, "untracked")
                 continue
 
             key = f"{best_track.track_id}@{camera_id}"
@@ -175,11 +189,12 @@ class FaceRecognizer:
             best_id, best_score = self._insight.match(embedding, all_embeddings)
             logger.info(
                 f"  face→track {best_track.track_id}: best_id={best_id} score={best_score:.4f} "
-                f"(need >={self.FRAME_HIGH_THRESHOLD} or >={self.FRAME_MEDIUM_THRESHOLD})"
+                f"(high>={self.FRAME_HIGH_THRESHOLD} verified>={self.FRAME_VERIFIED_THRESHOLD} med>={self.FRAME_MEDIUM_THRESHOLD})"
             )
 
             face_bbox_tuple = (fx1, fy1, fx2, fy2)
             if best_score >= self.FRAME_HIGH_THRESHOLD:
+                # Truly confident — skip FaceNet
                 emp_name = _snap_state.get_employee(best_id)
                 emp_name = emp_name["name"] if emp_name else str(best_id)
                 results[key] = IdentityResult(
@@ -190,6 +205,31 @@ class FaceRecognizer:
                     f"→ emp={best_id} score={best_score:.4f}"
                 )
                 _snap(face_bbox_tuple, best_track.track_id, best_id, emp_name, best_score, "frame_high")
+            elif best_score >= self.FRAME_VERIFIED_THRESHOLD:
+                # Borderline score — run FaceNet to guard against false positives
+                h, w = frame.shape[:2]
+                fc = frame[max(0, fy1):min(h, fy2), max(0, fx1):min(w, fx2)]
+                if fc.size > 0:
+                    verified, sim = self._verify_against_all(fc, best_id)
+                    logger.info(
+                        f"  frame_verified candidate emp={best_id} score={best_score:.4f} "
+                        f"verified={verified} sim={sim:.4f}"
+                    )
+                    if verified:
+                        emp_name = _snap_state.get_employee(best_id)
+                        emp_name = emp_name["name"] if emp_name else str(best_id)
+                        results[key] = IdentityResult(
+                            employee_id=best_id, confidence=best_score, method="frame_verified"
+                        )
+                        logger.info(
+                            f"identify_in_frame MATCH (verified): cam={camera_id} "
+                            f"track={best_track.track_id} → emp={best_id} score={best_score:.4f}"
+                        )
+                        _snap(face_bbox_tuple, best_track.track_id, best_id, emp_name, best_score, "frame_verified")
+                    else:
+                        _snap(face_bbox_tuple, best_track.track_id, None, None, best_score, "unverified")
+                else:
+                    _snap(face_bbox_tuple, best_track.track_id, None, None, best_score, "unverified")
             elif best_score >= self.FRAME_MEDIUM_THRESHOLD:
                 # Try top-3 candidates — top-1 may be wrong employee at similar score
                 h, w = frame.shape[:2]
@@ -225,10 +265,10 @@ class FaceRecognizer:
                         _snap(face_bbox_tuple, best_track.track_id, cand_id, emp_name, cand_score, "frame_medium+deepface")
                     else:
                         _snap(face_bbox_tuple, best_track.track_id, None, None, best_score, "unverified")
-            elif best_score >= 0.20:
-                # score below both thresholds but not pure noise — save for debug
+            elif best_score >= 0.25:
+                # score below both thresholds but face was detected — save for debug
                 _snap(face_bbox_tuple, best_track.track_id, None, None, best_score, "unknown")
-            # else: score < 0.20 — completely dark/noisy frame, skip entirely
+            # else: score < 0.25 — pure noise/extreme angle, skip entirely
 
         # ── Fallback: head-crop for unmatched tracks ───────────────────────
         # Any track whose face InsightFace didn't detect in the full frame

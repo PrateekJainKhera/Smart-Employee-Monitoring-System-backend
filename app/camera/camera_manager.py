@@ -17,12 +17,14 @@ class CameraThread(threading.Thread):
         self.location_label = location_label
         self._stop_event = threading.Event()
         self.is_connected = False
+        self._is_rtsp = isinstance(source, str) and source.lower().startswith("rtsp")
 
     def _open_capture(self) -> cv2.VideoCapture:
         """Open VideoCapture with low-latency settings."""
         import os
         source = self.source
         is_rtsp = isinstance(source, str) and source.lower().startswith("rtsp")
+        self._is_rtsp = is_rtsp
 
         if is_rtsp:
             # Force TCP transport + tiny buffer for minimum latency
@@ -35,9 +37,9 @@ class CameraThread(threading.Thread):
             cap = cv2.VideoCapture(source, cv2.CAP_DSHOW)
             if not cap.isOpened() and source != 0:
                 cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
-            # 720p @ 30fps — enough for buffalo_l, faster than 1080p on CPU
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  1280)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            # 480p @ 30fps — faster on CPU, sufficient for local webcam testing
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH,  640)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
             cap.set(cv2.CAP_PROP_FPS, 30)
 
         cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)   # keep only the latest frame in OpenCV buffer
@@ -68,9 +70,10 @@ class CameraThread(threading.Thread):
                     self.is_connected = False
                     break
 
-                # Resize once here — all consumers (pipeline + streams) get 1280px frames
-                # buffalo_l benefits from higher resolution for angled/distant faces
-                frame = resize_frame(frame, width=1280)
+                # RTSP cameras: resize to 1280px for buffalo_l accuracy
+                # Webcam (non-RTSP): keep at 640px native — upscaling wastes CPU
+                if self._is_rtsp:
+                    frame = resize_frame(frame, width=1280)
                 frame_buffer.put_frame(self.camera_id, frame)
 
             cap.release()

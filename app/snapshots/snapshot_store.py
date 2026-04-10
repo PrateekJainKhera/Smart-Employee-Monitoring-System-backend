@@ -19,8 +19,8 @@ import numpy as np
 
 from app.utils.logger import logger
 
-MAX_MEMORY   = 500    # ring buffer size (entries)
-MIN_INTERVAL = 5.0    # seconds between snapshots for the same track
+MAX_MEMORY   = 1000    # ring buffer size (entries)
+MIN_INTERVAL = 2.0    # seconds between snapshots for the same track
 JPEG_QUALITY = 85     # encode quality (0-100)
 
 
