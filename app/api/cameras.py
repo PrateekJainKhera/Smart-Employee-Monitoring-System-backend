@@ -210,9 +210,16 @@ async def stream_camera_detected(camera_id: int, state: AppState = Depends(get_s
 
 async def _mjpeg_tracked(camera_id: int):
     """
-    Push MJPEG with DeepSORT track IDs + bounding boxes.
-    Reads pre-computed tracks from the pipeline (no per-request detection).
+    Push MJPEG with DeepSORT track boxes + employee names.
+    Green box  = recognized employee.
+    Orange box = unrecognized person (no identity yet).
+    Reads pre-computed tracks + identities from pipeline state — no extra inference.
     """
+    from app.store import state as _state
+
+    COLOR_KNOWN   = (0, 210, 0)    # green  — recognized
+    COLOR_UNKNOWN = (0, 150, 255)  # orange — not yet identified
+
     while True:
         frame = camera_manager.get_frame(camera_id)
         if frame is not None:
@@ -220,14 +227,29 @@ async def _mjpeg_tracked(camera_id: int):
             tracks = pipeline_manager.get_tracks(camera_id)
 
             for track in tracks:
-                # Draw bounding box
-                cv2.rectangle(annotated, (track.x1, track.y1), (track.x2, track.y2),
-                              (0, 200, 255), 2)
-                # Draw track ID label
-                label = f"ID {track.track_id}"
-                label_y = track.y1 - 8 if track.y1 > 20 else track.y1 + 18
-                cv2.putText(annotated, label, (track.x1, label_y),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 200, 255), 2)
+                key    = f"{track.track_id}@{camera_id}"
+                emp_id = _state.get_track_identity(key)
+
+                if emp_id is not None:
+                    emp   = _state.get_employee(emp_id)
+                    label = emp["name"] if emp else f"ID {emp_id}"
+                    color = COLOR_KNOWN
+                else:
+                    label = "Unknown"
+                    color = COLOR_UNKNOWN
+
+                # Bounding box
+                cv2.rectangle(annotated, (track.x1, track.y1), (track.x2, track.y2), color, 2)
+
+                # Label background + text
+                (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 2)
+                label_y = track.y1 - 8 if track.y1 > 20 else track.y2 + th + 8
+                cv2.rectangle(annotated,
+                              (track.x1, label_y - th - 4),
+                              (track.x1 + tw + 6, label_y + 2),
+                              color, -1)
+                cv2.putText(annotated, label, (track.x1 + 3, label_y),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 2)
 
             draw_text(annotated, f"Tracked: {len(tracks)}", (10, 25))
             jpeg = frame_to_jpeg(annotated)

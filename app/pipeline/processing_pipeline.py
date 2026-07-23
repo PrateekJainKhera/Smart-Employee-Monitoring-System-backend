@@ -15,11 +15,43 @@ from app.config import settings
 _recognition_queues: dict[int, queue.Queue] = {}
 _recognition_queue_lock = threading.Lock()
 
+# ── OSNet runs in its own dedicated thread (separate from face recognition) ───
+# OSNet ~80ms/crop on CPU — keeping it out of the face recognition thread
+# ensures face recognition stays fast (v1/v2 speed) even with ReID enabled.
+_osnet_queue: queue.Queue = queue.Queue(maxsize=4)   # (camera_id, track_id, body_crop, attend_last)
+_osnet_last_run: dict[str, float]  = {}   # track_key → last run time
+_osnet_fail_count: dict[str, int]  = {}   # track_key → consecutive None-crop failures
+_osnet_attempts: dict[str, int]    = {}   # track_key → total OSNet dispatch count
+_OSNET_INTERVAL       = 4.0              # base seconds between OSNet calls per track
+_OSNET_MAX_INTERVAL   = 20.0            # max backoff interval for bad-crop tracks
+_OSNET_MAX_ATTEMPTS   = 5               # stop ReID after N dispatches with no match
+_OSNET_PER_CYCLE_CAP  = 2              # max tracks dispatched to OSNet per recognition cycle
+_MIN_BODY_AREA        = 4000            # min body crop area in pixels (≈50×80) — skip tiny/far crops
+_osnet_worker_started = False
+_osnet_worker_lock = threading.Lock()
+
+# ── Recognition stability — require N consistent recognitions before attendance ──
+# Threshold depends on confidence level:
+#   frame_high (≥0.55)      → 1 (immediate — high confidence, no lookalike risk)
+#   frame_verified (0.42–0.54) → 2 (borderline — require one confirmation)
+#   everything else          → 1
+# {track_key: (employee_id, consecutive_count)}
+_recog_stable: dict[str, tuple[int, int]] = {}
+
+_STABLE_BY_METHOD: dict[str, int] = {
+    "frame_high":            1,   # very confident → immediate
+    "insightface_high":      1,
+    "crop_high":             1,
+    "frame_verified":        2,   # borderline → need 1 confirmation
+    "frame_medium+deepface": 1,   # already passed FaceNet → immediate
+    "crop_medium+deepface":  1,
+}
+
 
 def _get_or_create_recognition_queue(camera_id: int) -> queue.Queue:
     with _recognition_queue_lock:
         if camera_id not in _recognition_queues:
-            q: queue.Queue = queue.Queue(maxsize=4)
+            q: queue.Queue = queue.Queue(maxsize=2)  # was 4 — smaller queue = always process freshest frame
             _recognition_queues[camera_id] = q
             threading.Thread(
                 target=_recognition_worker,
@@ -43,6 +75,8 @@ def _recognition_worker(q: queue.Queue) -> None:
             from app.recognition.face_recognizer import face_recognizer
             from app.config import settings as _settings
 
+            h, w = frame.shape[:2]   # computed once — reused throughout this worker call
+
             # ── Clothing signature collection (face_clothing mode only) ──────
             # Histograms are extracted ONCE per track (first sighting only).
             # Subsequent cycles just touch last_seen — no expensive cv2.calcHist.
@@ -58,7 +92,6 @@ def _recognition_worker(q: queue.Queue) -> None:
                             clothing_track_store.upsert(camera_id, track.track_id, None, now)
                             continue
                         # First sighting — extract histogram once
-                        h, w = frame.shape[:2]
                         x1 = max(0, int(track.bbox[0]))
                         y1 = max(0, int(track.bbox[1]))
                         x2 = min(w, int(track.bbox[2]))
@@ -85,6 +118,19 @@ def _recognition_worker(q: queue.Queue) -> None:
                         and existing != result.employee_id
                         and result.method in ("frame_high", "insightface_high", "crop_high")
                     )
+                    # ── Stability counter — prevent lookalike false positives ──
+                    # Required stable count depends on recognition method:
+                    #   high-confidence methods → 1 (immediate)
+                    #   borderline (frame_verified) → 2 (one confirmation)
+                    stable_min = _STABLE_BY_METHOD.get(result.method, 1)
+                    prev_emp, prev_count = _recog_stable.get(key, (None, 0))
+                    if prev_emp == result.employee_id:
+                        stable_count = prev_count + 1
+                    else:
+                        stable_count = 1
+                    _recog_stable[key] = (result.employee_id, stable_count)
+                    stable_enough = stable_count >= stable_min
+
                     if is_new or is_correction:
                         app_state.set_track_identity(key, result.employee_id)
                         track_id, _ = key.split("@")
@@ -92,7 +138,8 @@ def _recognition_worker(q: queue.Queue) -> None:
                         logger.info(
                             f"{tag} cam={camera_id} track={track_id} "
                             f"→ employee_id={result.employee_id} "
-                            f"conf={result.confidence:.2f} method={result.method}"
+                            f"conf={result.confidence:.2f} method={result.method} "
+                            f"stable={stable_count}/{stable_min}"
                         )
                         # WS: live detected event
                         try:
@@ -112,6 +159,34 @@ def _recognition_worker(q: queue.Queue) -> None:
                             sighting_store.record(result.employee_id, camera_id)
                         except Exception:
                             pass
+
+                        # ── OSNet embedding capture (face_reid mode) ────────
+                        # Store daily body embedding on face recognition success.
+                        # Updates if a higher-quality body crop appears later.
+                        if _settings.recognition_mode == "face_reid":
+                            try:
+                                from app.reid.osnet_engine import osnet_engine
+                                from app.reid.daily_reid_store import daily_reid_store
+                                if osnet_engine is not None:
+                                    for t in tracks:
+                                        if str(t.track_id) == track_id:
+                                            bx1 = max(0, int(t.x1))
+                                            by1 = max(0, int(t.y1))
+                                            bx2 = min(w, int(t.x2))
+                                            by2 = min(h, int(t.y2))
+                                            body_crop = frame[by1:by2, bx1:bx2]
+                                            if body_crop.size > 0:
+                                                emb = osnet_engine.get_embedding(body_crop)
+                                                quality = float((bx2 - bx1) * (by2 - by1))
+                                                stored = daily_reid_store.upsert(result.employee_id, emb, quality)
+                                                if stored:
+                                                    logger.info(
+                                                        f"OSNet embed stored: emp={result.employee_id} "
+                                                        f"quality={quality:.0f}"
+                                                    )
+                                            break
+                            except Exception as _oe:
+                                logger.warning(f"OSNet embed error: {_oe}")
 
                         # ── Retroactive track linking (face_clothing mode) ───
                         # Find earlier anonymous tracks with matching clothing
@@ -145,21 +220,83 @@ def _recognition_worker(q: queue.Queue) -> None:
                             except Exception as _re:
                                 logger.debug(f"ReID linking error: {_re}")
 
-                        # Immediately trigger attendance — no waiting for next pipeline cycle
-                        dkey = (result.employee_id, camera_id)
-                        now = time.monotonic()
-                        if now - attend_last.get(dkey, 0) >= ProcessingPipeline._ATTEND_DEBOUNCE:
-                            attend_last[dkey] = now
-                            try:
-                                from app.store import state as _state2
-                                cam2 = _state2.get_camera(camera_id)
-                                loc = cam2["location_label"] if cam2 else ""
-                                identified_by = "clothing_assist" if result.method == "clothing_reid" else "face"
-                                _attendance_queue.put_nowait((result.employee_id, camera_id, loc, identified_by))
-                            except queue.Full:
-                                logger.warning(f"Attendance queue full — dropping event emp={result.employee_id}")
-                            except Exception as _ae:
-                                logger.warning(f"Attendance trigger error: {_ae}")
+                        # Trigger attendance only after stable recognition
+                        # Lookalikes typically pass 1-2 frames but not 3 consecutive
+                        if stable_enough:
+                            dkey = (result.employee_id, camera_id)
+                            now = time.monotonic()
+                            if now - attend_last.get(dkey, 0) >= ProcessingPipeline._ATTEND_DEBOUNCE:
+                                attend_last[dkey] = now
+                                try:
+                                    from app.store import state as _state2
+                                    cam2 = _state2.get_camera(camera_id)
+                                    loc = cam2["location_label"] if cam2 else ""
+                                    identified_by = "clothing_assist" if result.method == "clothing_reid" else "face"
+                                    _attendance_queue.put_nowait((result.employee_id, camera_id, loc, identified_by))
+                                except queue.Full:
+                                    logger.warning(f"Attendance queue full — dropping event emp={result.employee_id}")
+                                except Exception as _ae:
+                                    logger.warning(f"Attendance trigger error: {_ae}")
+                        else:
+                            logger.info(
+                                f"  attendance held: emp={result.employee_id} stable={stable_count}/{stable_min} method={result.method}"
+                            )
+
+                # ── OSNet fallback — hand off to dedicated OSNet thread ────────
+                # OSNet runs in its own thread so it never blocks face recognition.
+                if _settings.recognition_mode == "face_reid":
+                    _ensure_osnet_worker()
+                    try:
+                        from app.reid.daily_reid_store import daily_reid_store
+                        if daily_reid_store.get_all():
+                            dispatched_this_cycle = 0          # #1: per-cycle cap counter
+                            for track in tracks:
+                                # #1: hard cap — max 2 OSNet dispatches per cycle
+                                if dispatched_this_cycle >= _OSNET_PER_CYCLE_CAP:
+                                    break
+                                key = f"{track.track_id}@{camera_id}"
+                                if key in recognized_track_ids:
+                                    continue
+                                if app_state.get_track_identity(key) is not None:
+                                    continue
+                                # #4: stop after MAX_ATTEMPTS — track is unregistered/always hidden
+                                if _osnet_attempts.get(key, 0) >= _OSNET_MAX_ATTEMPTS:
+                                    continue
+                                # Stagger: offset each track by (track_id * 0.8s)
+                                stagger = (track.track_id * 0.8) % _OSNET_INTERVAL
+                                # Backoff: tracks with repeated bad crops wait longer
+                                fails = _osnet_fail_count.get(key, 0)
+                                interval = min(
+                                    _OSNET_INTERVAL + stagger + fails * 2.0,
+                                    _OSNET_MAX_INTERVAL
+                                )
+                                now_osnet = time.monotonic()
+                                if now_osnet - _osnet_last_run.get(key, -stagger) < interval:
+                                    continue
+                                _osnet_last_run[key] = now_osnet
+                                bx1 = max(0, int(track.x1))
+                                by1 = max(0, int(track.y1))
+                                bx2 = min(w, int(track.x2))
+                                by2 = min(h, int(track.y2))
+                                # #2: early reject — skip tiny/far crops before queue
+                                body_area = (bx2 - bx1) * (by2 - by1)
+                                if body_area < _MIN_BODY_AREA or body_area == 0:
+                                    _osnet_fail_count[key] = fails + 1
+                                    continue
+                                body_crop = frame[by1:by2, bx1:bx2]
+                                if body_crop.size == 0:
+                                    _osnet_fail_count[key] = fails + 1
+                                    continue
+                                try:
+                                    _osnet_queue.put_nowait(
+                                        (camera_id, track.track_id, body_crop.copy(), attend_last)
+                                    )
+                                    _osnet_attempts[key] = _osnet_attempts.get(key, 0) + 1
+                                    dispatched_this_cycle += 1
+                                except queue.Full:
+                                    pass  # OSNet busy — skip, will retry next interval
+                    except Exception as _roe:
+                        logger.debug(f"OSNet queue error: {_roe}")
 
                 # WS: unknown persons (tracks with no result after max attempts)
                 # Emit once when a track exhausts all attempts without recognition
@@ -171,6 +308,74 @@ def _recognition_worker(q: queue.Queue) -> None:
             logger.warning(f"Recognition worker error: {e}")
         finally:
             q.task_done()
+
+
+# ── OSNet worker — dedicated thread, never blocks face recognition ────────────
+def _osnet_worker() -> None:
+    """Runs OSNet ReID in its own thread. Results written to app_state directly."""
+    while True:
+        try:
+            item = _osnet_queue.get(timeout=1)
+        except queue.Empty:
+            continue
+        camera_id, track_id, body_crop, attend_last = item
+        try:
+            from app.reid.osnet_engine import osnet_engine
+            from app.reid.daily_reid_store import daily_reid_store
+            from app.config import settings as _settings
+            if osnet_engine is None:
+                continue
+            gallery = daily_reid_store.get_all()
+            if not gallery:
+                continue
+            query_emb = osnet_engine.get_embedding(body_crop)
+            if query_emb is None:
+                # Crop too small/blurry — increment backoff for this track
+                key = f"{track_id}@{camera_id}"
+                _osnet_fail_count[key] = _osnet_fail_count.get(key, 0) + 1
+                continue
+            # Good crop — reset backoff
+            key = f"{track_id}@{camera_id}"
+            _osnet_fail_count.pop(key, None)
+            best_id, score = osnet_engine.match(query_emb, gallery)
+            reid_threshold = getattr(_settings, "reid_similarity_threshold", 0.65)
+            logger.info(
+                f"  OSNet ReID cam={camera_id} track={track_id}: "
+                f"best_id={best_id} score={score:.4f} (need>={reid_threshold})"
+            )
+            if best_id != -1 and score >= reid_threshold:
+                app_state.set_track_identity(key, best_id)
+                logger.info(
+                    f"OSNet MATCH cam={camera_id} track={track_id} "
+                    f"→ emp={best_id} score={score:.4f}"
+                )
+                dkey = (best_id, camera_id)
+                now_t = time.monotonic()
+                if now_t - attend_last.get(dkey, 0) >= ProcessingPipeline._ATTEND_DEBOUNCE:
+                    attend_last[dkey] = now_t
+                    try:
+                        cam3 = app_state.get_camera(camera_id)
+                        loc3 = cam3["location_label"] if cam3 else ""
+                        _attendance_queue.put_nowait((best_id, camera_id, loc3, "reid"))
+                    except queue.Full:
+                        pass
+        except Exception as _oe:
+            logger.debug(f"OSNet worker error: {_oe}")
+        finally:
+            _osnet_queue.task_done()
+
+
+def _ensure_osnet_worker() -> None:
+    global _osnet_worker_started
+    with _osnet_worker_lock:
+        if not _osnet_worker_started:
+            threading.Thread(
+                target=_osnet_worker,
+                daemon=True,
+                name="osnet-reid-worker",
+            ).start()
+            _osnet_worker_started = True
+            logger.info("OSNet ReID worker thread started")
 
 
 # ── Attendance worker ─────────────────────────────────────────────────────────
@@ -218,15 +423,18 @@ class ProcessingPipeline:
 
     # ── Timing ──────────────────────────────────────────────────────────────
     _PIPELINE_INTERVAL = 0.20   # ~5 pipeline cycles/sec
-    _DETECT_EVERY      = 2      # YOLO every 2 cycles → ~2.5 detections/sec, saves CPU on 3 cameras
+    _DETECT_EVERY      = 3      # YOLO every 3 cycles → ~1.7 detections/sec (was 2 → 2.5/sec)
+                                # 3 cameras × 1.7/sec = 5 YOLO calls/sec total (was 7.5)
+                                # saves ~150–200ms/sec of CPU — biggest throughput win
 
     # ── Recognition ─────────────────────────────────────────────────────────
-    _RECOG_FRESH_EVERY = 2      # try recognition every 2 cycles for fresh tracks
+    _RECOG_FRESH_EVERY = 3      # try recognition every 3 cycles for fresh tracks (was 2)
+                                # adds ~200ms to first attempt but reduces InsightFace load by 33%
     _RECOG_STALE_EVERY = 10     # cycles between recognition for stale tracks (3–9 attempts)
     _RECOG_MAX_ATTEMPTS = 10    # give up after N full-frame attempts
 
     # ── Safety ──────────────────────────────────────────────────────────────
-    _MAX_TRACKS      = 3        # only run recognition on the N closest persons per frame
+    _MAX_TRACKS      = 6        # run recognition on up to 6 persons per frame
     _ATTEND_DEBOUNCE = 30       # seconds between attendance queue pushes per employee
 
     # ── FPS monitor ─────────────────────────────────────────────────────────
@@ -343,6 +551,7 @@ class ProcessingPipeline:
         for k in [k for k in self._recog_attempts if k not in active_keys]:
             del self._recog_attempts[k]
             app_state.clear_track(k)
+            _recog_stable.pop(k, None)  # reset stability when track disappears
 
         # ── Step 3: Recognition — limit to N closest persons ─────────────
         # Sort by bbox area descending (larger area = person is closer to camera)
@@ -377,7 +586,7 @@ class ProcessingPipeline:
         if to_recognize:
             try:
                 q = _get_or_create_recognition_queue(self.camera_id)
-                q.put_nowait((self.camera_id, frame.copy(), to_recognize, self._attend_last))
+                q.put_nowait((self.camera_id, frame, to_recognize, self._attend_last))
                 for t in to_recognize:
                     key = f"{t.track_id}@{self.camera_id}"
                     self._recog_attempts[key] = self._recog_attempts.get(key, 0) + 1

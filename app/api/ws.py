@@ -160,6 +160,22 @@ def emit_unknown(camera_id: int, camera_label: str) -> None:
     })
 
 
+def emit_alert(alert_type: str, employee_id: int, employee_name: str, **kwargs) -> None:
+    """
+    Emit an alert event to all connected clients.
+    alert_type: "missing" | "after_hours"
+    Extra kwargs (e.g. minutes_since_seen, camera_label) are merged into the payload.
+    """
+    manager.send_event({
+        "event": "alert",
+        "alert_type": alert_type,
+        "employee_id": employee_id,
+        "employee_name": employee_name,
+        "timestamp": _ts(),
+        **kwargs,
+    })
+
+
 # ── WebSocket endpoint ────────────────────────────────────────────────────────
 
 @router.websocket("/ws/live")

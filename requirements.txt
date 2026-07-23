@@ -23,6 +23,12 @@ onnxruntime
 deep-sort-realtime
 
 # =========================
+# ReID (v3 — face_reid mode)
+# =========================
+# torchreid — install with: pip install torchreid
+# (if h5py fails on Python 3.14, use: pip install torchreid --no-deps)
+
+# =========================
 # OCR (Optional)
 # =========================
 easyocr

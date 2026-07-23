@@ -10,6 +10,43 @@ router = APIRouter(prefix="/settings", tags=["Settings"])
 
 VALID_MODES = {"face_only", "face_clothing", "face_reid"}
 
+_ENV_PATH = None
+
+def _get_env_path() -> str:
+    global _ENV_PATH
+    if _ENV_PATH is None:
+        from pathlib import Path
+        # Walk up from this file to find .env
+        p = Path(__file__).parent
+        for _ in range(5):
+            candidate = p / ".env"
+            if candidate.exists():
+                _ENV_PATH = str(candidate)
+                break
+            p = p.parent
+    return _ENV_PATH or ""
+
+def _persist_env(key: str, value: str) -> None:
+    """Update a single key in the .env file so changes survive restarts."""
+    path = _get_env_path()
+    if not path:
+        return
+    try:
+        from pathlib import Path
+        content = Path(path).read_text(encoding="utf-8")
+        lines = content.splitlines(keepends=True)
+        updated = False
+        for i, line in enumerate(lines):
+            if line.startswith(f"{key}="):
+                lines[i] = f"{key}={value}\n"
+                updated = True
+                break
+        if not updated:
+            lines.append(f"{key}={value}\n")
+        Path(path).write_text("".join(lines), encoding="utf-8")
+    except Exception:
+        pass  # best-effort — runtime change still applies even if persist fails
+
 
 class SettingsResponse(BaseModel):
     recognition_mode: str
@@ -49,6 +86,7 @@ def update_settings(body: SettingsUpdate):
                 detail=f"Invalid mode. Must be one of: {', '.join(VALID_MODES)}"
             )
         settings.recognition_mode = body.recognition_mode
+        _persist_env("RECOGNITION_MODE", body.recognition_mode)
 
     if body.reid_similarity_threshold is not None:
         if not 0.0 <= body.reid_similarity_threshold <= 1.0:

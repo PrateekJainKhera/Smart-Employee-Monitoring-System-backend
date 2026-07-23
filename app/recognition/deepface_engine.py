@@ -11,7 +11,7 @@ import numpy as np
 from app.utils.logger import logger
 from app.recognition.insightface_engine import _normalize_brightness
 
-VERIFY_THRESHOLD = 0.50  # cosine similarity — above this = same person
+VERIFY_THRESHOLD = 0.45  # cosine similarity — above this = same person
 
 
 class DeepFaceEngine:

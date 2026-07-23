@@ -32,9 +32,13 @@ class Settings(BaseSettings):
     recognition_mode: str = "face_only"
 
     # Clothing ReID settings (used when recognition_mode != face_only)
-    reid_similarity_threshold: float = 0.75   # min histogram similarity to link tracks
+    reid_similarity_threshold: float = 0.65   # min cosine similarity for OSNet ReID match
     reid_time_window_min: int = 60            # max minutes back to search for matching track
     reid_same_camera_only: bool = True        # only link tracks from same camera
+
+    # Alerts
+    missing_alert_min: int = 15             # minutes since last seen before "missing" alert fires
+    after_hours_alerts: bool = True         # alert when employee detected after office_end_hour
 
     # Embeddings persistence
     embeddings_path: str = "data/embeddings.pkl"

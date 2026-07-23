@@ -34,13 +34,13 @@ class IdentityResult:
 
 class FaceRecognizer:
     # Close-up crop thresholds (registration / verify)
-    HIGH_THRESHOLD   = 0.65
-    MEDIUM_THRESHOLD = 0.50
+    HIGH_THRESHOLD   = 0.60
+    MEDIUM_THRESHOLD = 0.45
 
     # Full-frame thresholds
-    FRAME_HIGH_THRESHOLD     = 0.55  # direct match — truly confident, skip FaceNet
-    FRAME_VERIFIED_THRESHOLD = 0.40  # borderline — run FaceNet to confirm before accepting
-    FRAME_MEDIUM_THRESHOLD   = 0.35  # minimum score to attempt FaceNet fallback
+    FRAME_HIGH_THRESHOLD     = 0.50  # direct match — truly confident, skip FaceNet
+    FRAME_VERIFIED_THRESHOLD = 0.42  # borderline — run FaceNet to confirm before accepting
+    FRAME_MEDIUM_THRESHOLD   = 0.37  # minimum score to attempt FaceNet fallback
 
     def __init__(
         self,
@@ -148,6 +148,9 @@ class FaceRecognizer:
 
         for face in detected_faces:
             fx1, fy1, fx2, fy2 = face["bbox"]
+            # Skip tiny detections — likely background noise, not real faces
+            if (fx2 - fx1) < 20 or (fy2 - fy1) < 20:
+                continue
             face_cx = (fx1 + fx2) / 2
             face_cy = (fy1 + fy2) / 2
 
@@ -177,8 +180,19 @@ class FaceRecognizer:
                     if snapshot_store.should_save(untrack_key):
                         embedding = face["embedding"]
                         best_id, best_score = self._insight.match(embedding, all_embeddings)
-                        snapshot_store.save(uc, camera_id, _cam_label(camera_id),
-                                            None, None, best_score, "untracked")
+                        # High-confidence untracked face — still identify it
+                        if best_score >= self.FRAME_HIGH_THRESHOLD:
+                            emp_name = _snap_state.get_employee(best_id)
+                            emp_name = emp_name["name"] if emp_name else str(best_id)
+                            snapshot_store.save(uc, camera_id, _cam_label(camera_id),
+                                                best_id, emp_name, best_score, "untracked_high")
+                            logger.info(
+                                f"identify_in_frame MATCH (untracked): cam={camera_id} "
+                                f"→ emp={best_id} score={best_score:.4f}"
+                            )
+                        else:
+                            snapshot_store.save(uc, camera_id, _cam_label(camera_id),
+                                                None, None, best_score, "untracked")
                 continue
 
             key = f"{best_track.track_id}@{camera_id}"
@@ -206,16 +220,18 @@ class FaceRecognizer:
                 )
                 _snap(face_bbox_tuple, best_track.track_id, best_id, emp_name, best_score, "frame_high")
             elif best_score >= self.FRAME_VERIFIED_THRESHOLD:
-                # Borderline score — run FaceNet to guard against false positives
+                # Borderline score — run FaceNet to guard against false positives.
+                # FaceNet must score ≥ 0.50 across the entire verified zone (0.42–0.54).
+                facenet_min = 0.50
                 h, w = frame.shape[:2]
                 fc = frame[max(0, fy1):min(h, fy2), max(0, fx1):min(w, fx2)]
                 if fc.size > 0:
                     verified, sim = self._verify_against_all(fc, best_id)
                     logger.info(
                         f"  frame_verified candidate emp={best_id} score={best_score:.4f} "
-                        f"verified={verified} sim={sim:.4f}"
+                        f"verified={verified} sim={sim:.4f} facenet_min={facenet_min:.2f}"
                     )
-                    if verified:
+                    if verified and sim >= facenet_min:
                         emp_name = _snap_state.get_employee(best_id)
                         emp_name = emp_name["name"] if emp_name else str(best_id)
                         results[key] = IdentityResult(
@@ -238,7 +254,7 @@ class FaceRecognizer:
                     candidates = self._insight.match_top_n(embedding, all_embeddings, n=3)
                     matched_candidate = None
                     # Require higher FaceNet confidence when InsightFace score is low
-                    facenet_min = 0.56 if best_score < 0.42 else 0.50
+                    facenet_min = 0.55 if best_score < 0.44 else 0.50
                     for cand_id, cand_score in candidates:
                         if cand_score < self.FRAME_MEDIUM_THRESHOLD:
                             break
@@ -304,7 +320,25 @@ class FaceRecognizer:
                         )
                         snapshot_store.save(crop, camera_id, _cam_label(camera_id), best_id, emp_name, best_score, "crop_medium+deepface")
 
-        return results
+        # ── Deduplicate: same employee on multiple tracks → keep highest confidence ──
+        # Can happen in group scenes where two faces both score high against one employee.
+        emp_best: dict[int, tuple[str, float]] = {}  # employee_id → (best_key, best_conf)
+        for key, res in results.items():
+            eid = res.employee_id
+            if eid not in emp_best or res.confidence > emp_best[eid][1]:
+                emp_best[eid] = (key, res.confidence)
+
+        deduped: dict[str, IdentityResult] = {}
+        for key, res in results.items():
+            if emp_best[res.employee_id][0] == key:
+                deduped[key] = res
+            else:
+                logger.info(
+                    f"  dedup: dropped track key={key} emp={res.employee_id} "
+                    f"conf={res.confidence:.4f} — kept higher-conf track {emp_best[res.employee_id][0]}"
+                )
+
+        return deduped
 
     def _get_head_crop(self, frame: np.ndarray, track) -> np.ndarray | None:
         """Crop the top 55% of a person track bbox as head region, with padding."""

@@ -56,8 +56,9 @@ class EmployeeService:
         embedding = self._insight.get_embedding(img)
         embedding_detected = embedding is not None
 
-        # 3. Save image always — even if no embedding detected
-        # Angled/chin-down photos are still useful for FaceNet reference matching
+        # 3. Save image — always save, even if no embedding detected.
+        # Top-angle / side-angle photos may not yield an InsightFace embedding
+        # but are still useful as FaceNet reference images for secondary verification.
         img_dir = FACES_DIR / str(employee_id)
         img_dir.mkdir(parents=True, exist_ok=True)
         existing = sorted(img_dir.glob("photo_*.jpg"))
@@ -66,7 +67,7 @@ class EmployeeService:
         cv2.imwrite(str(save_path), img)
         logger.info(
             f"EmployeeService: saved face image to {save_path} "
-            f"(embedding={'yes' if embedding_detected else 'no — angled photo, saved for FaceNet only'})"
+            f"({'embedding extracted' if embedding_detected else 'no embedding — saved as FaceNet reference'})"
         )
         total = next_index
 
@@ -97,7 +98,7 @@ class EmployeeService:
 
         logger.info(
             f"EmployeeService: face registered for employee {employee_id} "
-            f"(photo {total}, embedding={'extracted' if embedding_detected else 'skipped — saved for FaceNet'})"
+            f"(photo {total}, embedding={'yes' if embedding_detected else 'no — FaceNet reference only'})"
         )
         return {
             "success": True,
@@ -106,7 +107,7 @@ class EmployeeService:
             "total_photos": total,
             "embedding_dim": len(embedding) if embedding_detected else 0,
             "image_path": str(save_path),
-            "warning": None if embedding_detected else "Face not clearly detected — photo saved for angle reference",
+            "warning": None if embedding_detected else "Face not clearly detected from this angle — photo saved as secondary reference only. Primary recognition requires at least one front/side-angle photo.",
         }
 
     def delete_face(self, employee_id: int, state: AppState) -> None:
@@ -135,20 +136,26 @@ class EmployeeService:
     def delete_single_photo(self, employee_id: int, photo_index: int, state: AppState) -> bool:
         """
         Remove one specific photo (1-based index as shown to users).
-        Returns False if index is out of range.
+        Returns False only if neither the file nor the embedding exists.
+
+        File and embedding are deleted independently — they can fall out of sync
+        if a photo was uploaded but failed to generate an embedding (or vice versa).
         """
         zero_idx = photo_index - 1
-        removed = self._store.remove_one(employee_id, zero_idx)
-        if not removed:
-            return False
 
-        # Remove the image file
+        # Remove embedding if present (ignore if out of range — file/embedding may be out of sync)
+        self._store.remove_one(employee_id, zero_idx)
+
+        # Remove the image file — this is the source of truth for what the user sees
         img_path = FACES_DIR / str(employee_id) / f"photo_{photo_index}.jpg"
-        if img_path.exists():
-            img_path.unlink()
+        if not img_path.exists():
+            # Nothing on disk either — truly not found
+            return False
+        img_path.unlink()
 
         # If no photos left, clear face_registered flag
-        if self._store.photo_count(employee_id) == 0:
+        remaining_files = list((FACES_DIR / str(employee_id)).glob("photo_*.jpg"))
+        if not remaining_files and self._store.photo_count(employee_id) == 0:
             state.update_employee(employee_id, face_registered=False)
 
         logger.info(

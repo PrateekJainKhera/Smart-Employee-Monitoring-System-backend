@@ -14,6 +14,7 @@ from app.api import employees, cameras, attendance, reports, snapshots, sighting
 from app.api import ws as ws_module
 import app.recognition.face_recognizer as _fr_module
 import app.services.employee_service as _es_module
+import app.reid.osnet_engine as _osnet_module
 
 START_TIME = time.time()
 
@@ -30,7 +31,7 @@ async def lifespan(app: FastAPI):
     from app.recognition.deepface_engine import DeepFaceEngine
     from app.recognition.embedding_store import EmbeddingStore
 
-    insightface_engine = InsightFaceEngine(model_name="buffalo_l", det_size=(1280, 1280))
+    insightface_engine = InsightFaceEngine(model_name="buffalo_l", det_size=(640, 640))
     deepface_engine = DeepFaceEngine()
     embedding_store = EmbeddingStore(settings.embeddings_path)
 
@@ -44,6 +45,11 @@ async def lifespan(app: FastAPI):
     logger.info(
         f"Face recognition ready — {embedding_store.count()} embedding(s) loaded from store"
     )
+
+    # ── Initialize OSNet ReID engine (face_reid mode) ─────────
+    from app.reid.osnet_engine import OSNetEngine
+    _osnet_module.osnet_engine = OSNetEngine()
+    logger.info("OSNet ReID engine initialized (model loads lazily on first use)")
 
     # ── Initialize SQL Server (Phase 5) ──────────────────────
     from app.database.connection import is_db_enabled, test_connection, get_raw_connection
@@ -111,6 +117,10 @@ async def lifespan(app: FastAPI):
 
         _threading.Thread(target=_auto_checkout_loop, daemon=True, name="auto-checkout").start()
         logger.info("AutoCheckout scheduler started (runs every 60s, threshold=20min)")
+
+    # ── Start alert worker ───────────────────────────────────
+    from app.services.alert_service import start_alert_worker
+    start_alert_worker()
 
     # ── Start camera threads + processing pipelines ──────────
     existing_cameras = state.list_cameras()

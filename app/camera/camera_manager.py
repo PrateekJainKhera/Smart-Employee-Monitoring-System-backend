@@ -70,10 +70,10 @@ class CameraThread(threading.Thread):
                     self.is_connected = False
                     break
 
-                # RTSP cameras: resize to 1280px for buffalo_l accuracy
+                # RTSP cameras: resize to 640px to match InsightFace det_size
                 # Webcam (non-RTSP): keep at 640px native — upscaling wastes CPU
                 if self._is_rtsp:
-                    frame = resize_frame(frame, width=1280)
+                    frame = resize_frame(frame, width=640)
                 frame_buffer.put_frame(self.camera_id, frame)
 
             cap.release()
